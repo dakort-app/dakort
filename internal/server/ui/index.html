@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>Dakort</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      // Light or dark before the first paint (see src/theme.ts).
+      document.documentElement.dataset.theme = localStorage.getItem('made.theme') === 'dark' ? 'dark' : 'light'
+    </script>
+    <script type="module" crossorigin src="/app.js"></script>
+    <link rel="modulepreload" crossorigin href="/rolldown-runtime.js">
+    <link rel="modulepreload" crossorigin href="/preload-helper.js">
+    <link rel="stylesheet" crossorigin href="/index.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

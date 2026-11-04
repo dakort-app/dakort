@@ -1,0 +1,53 @@
+# On every push: the build, vet and the offline tests, and the UI's type
+# check and unit tests. All three systems in the public repo
+# (dakort-app/dakort, one commit per release, where Actions is free);
+# Linux alone in the private dev repo, where GitHub counts a macOS minute
+# as ten and a Windows one as two against the free allowance (run by hand
+# from Actions, Run workflow, for all three). The tests that spawn the
+# real CLIs need a signed-in Claude, so they run on a person's machine,
+# not here.
+name: ci
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  go:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ (github.repository == 'dakort-app/dakort' || github.event_name == 'workflow_dispatch') && fromJSON('["ubuntu-latest", "macos-latest", "windows-latest"]') || fromJSON('["ubuntu-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: web
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test -short ./...
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npx tsc --noEmit -p .
+        working-directory: web
+      - run: npx vitest run
+        working-directory: web

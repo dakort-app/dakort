@@ -1,0 +1,92 @@
+# GoReleaser builds every platform's binary on a tag and publishes the
+# release, the Homebrew formula, the Scoop manifest and the Linux packages
+# (.github/workflows/release.yml). Check the config with
+# `go run github.com/goreleaser/goreleaser/v2@latest check`, and try a build
+# without publishing with `... release --snapshot --clean`.
+version: 2
+project_name: dakort
+
+before:
+  hooks:
+    # The UI is embedded in the binary; build it first.
+    - sh -c "cd web && npm ci && npm run build"
+
+builds:
+  - id: dakort
+    main: ./cmd/dakort
+    binary: dakort
+    env:
+      - CGO_ENABLED=0
+    goos: [windows, darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+# The public repo has one commit per release, so its history says nothing;
+# the notes are written on the draft by hand.
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: dakort-app
+    name: dakort
+  draft: true # read the notes over before it goes out
+  prerelease: auto # v0.2.0-rc1 is marked a pre-release
+
+# A cask, as Homebrew now wants prebuilt binaries shipped (brews is
+# deprecated). Until the binary is signed, the quarantine mark macOS puts
+# on a download is taken off after install, as GoReleaser's docs advise;
+# otherwise Gatekeeper refuses to run it.
+homebrew_casks:
+  - name: dakort
+    repository:
+      owner: dakort-app
+      name: homebrew-tap
+      token: "{{ .Env.TAP_TOKEN }}"
+    directory: Casks
+    skip_upload: auto # a release candidate stays off the tap
+    homepage: https://github.com/dakort-app/dakort
+    description: Claude Code and Codex on your phone, with your real sessions
+    license: MIT
+    binaries: [dakort]
+    hooks:
+      post:
+        install_steps: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/dakort"]
+          end
+
+scoops:
+  - name: dakort
+    repository:
+      owner: dakort-app
+      name: scoop-bucket
+      token: "{{ .Env.TAP_TOKEN }}"
+    skip_upload: auto # a release candidate stays off the bucket
+    homepage: https://github.com/dakort-app/dakort
+    description: Claude Code and Codex on your phone, with your real sessions
+    license: MIT
+
+nfpms:
+  - package_name: dakort
+    vendor: The Dakort Authors
+    maintainer: The Dakort Authors <dakort-app@users.noreply.github.com>
+    homepage: https://github.com/dakort-app/dakort
+    description: Claude Code and Codex on your phone, with your real sessions
+    license: MIT
+    formats: [deb, rpm]
+    bindir: /usr/bin

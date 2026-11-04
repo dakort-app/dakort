@@ -1,0 +1,2024 @@
+/* A light, warm look: off-white paper rather than pure white, one accent
+   (Claude's terracotta) used sparingly, status colours as before. Phone
+   first: full-height layout from 100dvh, safe-area insets, 16 px inputs
+   (iOS zooms on less). */
+
+:root {
+  --bg: #fdfcfa; /* the reading panels */
+  --side: #f5f3ef; /* tab row */
+  --sidebar: #ece9e3; /* projects and files: a shade darker, set apart */
+  --frame: #ebe8e2; /* around the panels */
+  --line: #e4e0d8;
+  --text: #2b2a27;
+  --faint: #75716a;
+  --accent: #3b6ea8; /* a calm blue: active tab, your prompts, send, switches */
+  --accent-soft: #e9eff6;
+  /* Tints behind things: the item in view, warnings, errors, diffs. */
+  --tint-current: #eef4fb;
+  --tint-warn: #fff6dd;
+  --tint-err: #fdecec;
+  --tint-ok: #e9f7ec;
+  --tint-jump: #fff1b8;
+  --chip-on: #ebe8e2;
+  --knob-off: #cfcbc4;
+  --pdf-around: #e6e3dd;
+  color-scheme: light;
+  --run: var(--accent); /* working: the accent, pulsing (.dot.run) */
+  --ok: #2ea043;
+  --warn: #bf8700;
+  --err: #c72e2e;
+  --claude: #d97757; /* Claude's orange: the agents' marks on session tabs */
+  --mono: ui-monospace, 'Cascadia Code', Consolas, Menlo, monospace;
+  font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Dark (the system's setting or this device's pick, see theme.ts): the
+   same warm family, a lighter terracotta so it reads on dark. PDF pages
+   stay white, like paper. */
+:root[data-theme='dark'] {
+  --bg: #1f1e1c;
+  --side: #262522;
+  --sidebar: #2b2a27;
+  --frame: #161513;
+  --line: #3a3834;
+  --text: #e6e3dd;
+  --faint: #9a958c;
+  --accent: #5f93d3;
+  --accent-soft: #232c38;
+  --tint-current: #24303b;
+  --tint-warn: #3a3220;
+  --tint-err: #3d2424;
+  --tint-ok: #1f3324;
+  --tint-jump: #4a4220;
+  --chip-on: #34322e;
+  --knob-off: #57534c;
+  --pdf-around: #2a2926;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --err: #f2665e;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+#root {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+input,
+textarea {
+  font-size: 16px;
+}
+
+.grow {
+  flex: 1;
+}
+.faint {
+  color: var(--faint);
+}
+.small {
+  font-size: 12.5px;
+}
+.warn {
+  color: var(--warn);
+}
+.error {
+  color: var(--err);
+}
+.pad {
+  padding: 8px 14px;
+}
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.clickable {
+  cursor: pointer;
+}
+.center {
+  margin: auto;
+  padding: 24px;
+  text-align: center;
+}
+.center-text {
+  text-align: center;
+  padding: 8px;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--side);
+  flex-shrink: 0;
+}
+.brand {
+  font-weight: 600;
+}
+.btn {
+  border: 1px solid var(--line);
+  background: var(--bg);
+  border-radius: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.icon {
+  border: 0;
+  background: none;
+  min-width: 36px;
+  height: 36px;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 6px;
+  color: var(--faint);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.icon:hover {
+  background: var(--line);
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+.dot.ok {
+  background: var(--ok);
+}
+.dot.warn {
+  background: var(--warn);
+}
+.dot.run {
+  background: var(--run);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.dot.unread {
+  background: var(--accent);
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Lists: home, open folder, history. */
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+}
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.list.scroll {
+  overflow-y: auto;
+  flex: 1;
+}
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px 10px 14px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.item:hover {
+  background: var(--side);
+}
+.item.current {
+  background: var(--tint-current);
+}
+.item-main {
+  flex: 1;
+  min-width: 0;
+}
+.item-title {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.item-title .faint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-left: 4px;
+}
+
+.sheet-back {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 10;
+}
+.sheet {
+  background: var(--bg);
+  width: 100%;
+  max-width: 640px;
+  max-height: 85dvh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px 12px 0 0;
+  overflow: hidden;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@media (min-width: 900px) {
+  .sheet-back {
+    align-items: flex-start;
+    padding-top: 10vh;
+  }
+  .sheet {
+    border-radius: 10px;
+  }
+  .sheet.tall {
+    height: auto;
+  }
+}
+/* A sheet with a search box keeps its height on a phone. Sized by its list,
+   the first letter typed shrank it to the bottom, under the keyboard, and
+   left only the drawer behind it in sight. */
+.sheet.tall {
+  height: 85dvh;
+}
+.filter {
+  margin: 10px 14px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+/* Workspace. */
+.workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.tabs {
+  display: flex;
+  overflow-x: auto;
+  background: var(--side);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+  scrollbar-width: none;
+}
+/* Tabs with rounded tops after Chrome's, but the active one in its own
+   tint over a line, set apart from the conversation; the others on the
+   bar, split by thin lines, a soft rounded highlight under the pointer.
+   Every tab shows its ×. */
+/* Renaming in place: the title becomes this field. */
+.tab-rename {
+  min-width: 0;
+  width: 160px;
+  font-size: 13.5px;
+  padding: 1px 4px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+}
+.tab {
+  -webkit-touch-callout: none; /* a long press renames, not the phone's menu */
+  user-select: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 220px;
+  min-width: 0;
+  padding: 0 4px 0 12px;
+  height: 30px;
+  font-size: 13.5px;
+  cursor: pointer;
+  color: color-mix(in srgb, var(--text) 82%, var(--faint));
+  flex-shrink: 0;
+  border-radius: 8px 8px 0 0;
+}
+.tab:hover {
+  color: var(--text);
+}
+/* The separators: a short line at each inactive tab's right, none next to
+   the active tab or under the pointer. */
+.tab:not(.active) {
+  background: linear-gradient(var(--knob-off), var(--knob-off)) right center / 1px 16px no-repeat;
+}
+.tab:not(.active):hover,
+.tab:has(+ .tab.active),
+.tab:has(+ .tab:hover) {
+  background-image: none;
+}
+.tab:not(.active):hover {
+  background-color: var(--side);
+  border-radius: 8px;
+  height: 26px;
+  margin-bottom: 4px;
+}
+/* The active tab in its own tint, not the conversation's colour: in that
+   colour its title read as part of the text scrolling under it. An accent
+   line under it marks it from across the room. */
+.tab.active {
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.tab .tab-x {
+  color: inherit;
+}
+.tab-x {
+  border: 0;
+  background: none;
+  color: var(--faint);
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.tab-x:hover {
+  background: var(--line);
+}
+.ws-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  position: relative;
+  gap: 3px;
+  padding: 0 3px 3px; /* none on top: the panels start at the window's edge */
+  background: var(--frame);
+}
+/* Two boxes, as in VS Code: the explorer, and the tabs with what they show. */
+.panel {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.explorer-panel {
+  width: var(--explorer-w, 280px);
+  flex-shrink: 0;
+  background: var(--sidebar);
+}
+/* Drag bar over the gap between the explorer and the editor, and the one
+   between the two panes of a split. */
+.splitter,
+.pane-splitter {
+  width: 6px; /* wider than the 3 px gap, to grab; it overlaps the panels' edges */
+  margin: 0 -4.5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+  border-radius: 3px;
+}
+.splitter:hover,
+.splitter:active,
+.pane-splitter:hover,
+.pane-splitter:active {
+  background: var(--line);
+}
+/* Split view: the two panes share the width by --split (the first pane's
+   share), set on .ws-body and while dragging. */
+.ws-body.split .editor-panel[data-pane='0'] {
+  flex: var(--split, 0.5) 1 0;
+}
+.ws-body.split .editor-panel[data-pane='1'] {
+  flex: calc(1 - var(--split, 0.5)) 1 0;
+}
+/* The pane that is not focused keeps its tab, with a grey line under it
+   instead of the accent: the accent marks where new tabs and the
+   explorer's files go. */
+.ws-body.split .editor-panel:not(.focused) .tab.active {
+  box-shadow: inset 0 -2px 0 var(--knob-off);
+  font-weight: 500;
+}
+/* While a tab is dragged: the pane it would go to, or the right half of
+   the content where it would open to the side. */
+.editor-panel.drop-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+.drop-side {
+  position: absolute;
+  inset: 6px 6px 6px 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 3;
+}
+html.tab-dragging,
+html.tab-dragging * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* A tab's menu (right-click on a laptop). */
+.tab-menu {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 190px;
+  padding: 4px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+}
+.tab-menu button {
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  font-size: 13.5px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.tab-menu button:hover {
+  background: var(--line);
+}
+/* Icons before tab titles and file names: file types in their own
+   colours, the agents' marks in Claude's orange. */
+.file-icon,
+.agent-icon {
+  flex-shrink: 0;
+}
+.agent-icon {
+  color: var(--claude);
+}
+.tab .file-icon,
+.tab .agent-icon {
+  margin-right: 6px;
+}
+.tab-overview .file-icon,
+.tab-overview .agent-icon {
+  margin-right: 2px;
+}
+.tree-row .file-icon {
+  margin-right: 5px;
+}
+.explorer-panel .explorer {
+  overflow-y: auto;
+  flex: 1;
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 4px 0 12px;
+  flex-shrink: 0;
+}
+.explorer-title.faint {
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: var(--text);
+}
+.editor-panel {
+  flex: 1;
+  min-width: 0;
+}
+.tabs-row {
+  display: flex;
+  align-items: center;
+  /* The frame's darker tone and a line under it, so the bar never reads
+     as part of the text scrolling below. */
+  background: var(--frame);
+  border-bottom: 1px solid var(--knob-off);
+  flex-shrink: 0;
+  padding-right: 4px;
+}
+/* Its buttons a little smaller, so the bar hugs the tabs. */
+.tabs-row .icon {
+  height: 30px;
+  min-width: 32px;
+}
+/* The open folders: a section atop the explorer, or a menu from the
+   folder's name in the tab row. */
+.folder-list {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 4px;
+}
+.theme-btn {
+  font-size: 15px;
+  color: var(--faint);
+}
+.folder-list .panel-head {
+  gap: 4px; /* the title starts where FILES does; hide is last, at the corner */
+}
+.fold {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: none;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0 4px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.folder-row:hover {
+  background: var(--line);
+}
+/* The current project in the active tab's blue, with the same accent line
+   (at its left here). */
+.folder-row.on {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+  font-weight: 600;
+}
+.folder-row.more,
+.folder-row.add {
+  color: var(--faint);
+}
+.folder-row {
+  -webkit-touch-callout: none; /* a long press renames, as on a tab */
+}
+.folder-row .tab-rename {
+  width: auto;
+}
+/* Why a rename was refused, under its row; with the processes blocking
+   it, each with a Stop, when that is the reason. */
+.folder-error {
+  margin: 0 4px 4px;
+  padding: 4px 8px;
+  color: var(--err);
+}
+.folder-error .row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+.folder-error .leftover {
+  align-items: center;
+  margin-top: 4px;
+  color: var(--text);
+}
+.folder-list .folder-error .folder-x {
+  visibility: visible;
+}
+/* A folder's close button: in the explorer only under the pointer, in
+   the menu always. */
+.folder-x {
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  color: var(--faint);
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 1.1;
+}
+.folder-x:hover {
+  background: var(--line);
+  color: var(--text);
+}
+.folder-list .folder-x {
+  visibility: hidden;
+}
+.folder-list .folder-row:hover .folder-x {
+  visibility: visible;
+}
+/* With the explorer hidden: another folder's activity, on its button. */
+.icon.dotted {
+  position: relative;
+}
+.icon.dotted .dot {
+  position: absolute;
+  top: 3px;
+  right: 1px;
+  margin: 0;
+}
+/* The phone's way between tabs: a count that opens a list of them. */
+.tab-count {
+  display: none;
+  min-width: 26px;
+  height: 22px;
+  margin: 0 4px;
+  padding: 0 5px;
+  border: 1.7px solid var(--faint);
+  border-radius: 5px;
+  background: none;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+@media (max-width: 899px) {
+  .tab-count {
+    display: inline-block;
+  }
+}
+.tab-overview .item {
+  min-height: 56px;
+}
+.tab-overview .dot {
+  flex-shrink: 0;
+}
+/* « and »: tabs hidden past that end of the row (laptop only; a phone
+   swipes, and has the tab count). */
+.tab-arrow {
+  flex-shrink: 0;
+  align-self: stretch;
+  min-width: 22px;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--faint);
+  font-size: 15px;
+  cursor: pointer;
+}
+.tab-arrow:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+.tab-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+@media (max-width: 899px) {
+  .tab-arrow {
+    display: none;
+  }
+}
+.tabs-row .tabs {
+  position: relative; /* the tabs' offsetLeft counts from here */
+  flex: 1;
+  min-width: 0;
+  border-bottom: 0;
+  background: none; /* the bar's tone, not the strip's own */
+  /* Tabs sit on the bar's floor, with only a sliver of bar above them. */
+  align-items: flex-end;
+  align-self: stretch;
+  padding: 3px 6px 0;
+}
+.drawer-back {
+  display: none;
+}
+@media (max-width: 899px) {
+  .ws-body {
+    padding: 0;
+    gap: 0;
+  }
+  .panel {
+    border-radius: 0;
+    border: 0;
+  }
+  .explorer-panel {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 85vw;
+    max-width: 320px;
+    z-index: 5;
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
+  }
+  .drawer-back {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 4; /* under the drawer, over everything else */
+    background: rgba(0, 0, 0, 0.15);
+  }
+  .splitter,
+  .pane-splitter {
+    display: none;
+  }
+}
+/* The mode chip: as wide as the mode's name, with the dropdown invisibly
+   on top of it. */
+.mode-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 45%;
+  padding: 2px 10px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mode-chip .caret {
+  font-size: 10px;
+  color: var(--faint);
+}
+/* The provider on a session row. */
+.prov-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 10.5px;
+  color: var(--faint);
+  vertical-align: 1px;
+}
+.mode-chip select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 16px; /* iOS zooms into smaller fields */
+}
+.cache-wrap {
+  position: relative;
+}
+.cache-clock {
+  border: 0;
+  background: none;
+  font-size: 12.5px;
+  color: var(--faint);
+  padding: 2px 6px;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cache-clock.expired {
+  color: var(--err);
+}
+.box-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+/* The context size with a small bar against the model's window. */
+.ctx {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.ctx-bar {
+  position: relative;
+  width: 30px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--knob-off);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.ctx-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.ctx-bar.mid .ctx-fill {
+  background: var(--warn);
+}
+.ctx-bar.high .ctx-fill {
+  background: var(--err);
+}
+/* On a phone the composer row is tight: an expired cache is a red clock
+   alone (a tap explains), the model chip keeps a readable width, and the
+   context size (and "in another Claude") move up to the box's corner
+   beside the text. */
+@media (max-width: 600px) {
+  .cache-clock.expired .cache-text {
+    display: none;
+  }
+  .composer-box {
+    position: relative;
+  }
+  .composer-box textarea {
+    padding-right: 38px;
+  }
+  /* Hung from the clock, mid-row, it ran off the right edge. (The base
+     .cache-tip rule comes later in the file, hence the longer selector.) */
+  .cache-wrap .cache-tip {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    bottom: calc(100px + env(safe-area-inset-bottom));
+  }
+  .composer-box.held textarea {
+    padding-right: 150px;
+  }
+  .box-info {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+  }
+  .picker {
+    flex-shrink: 1;
+    min-width: 92px;
+  }
+  .mode-chip {
+    max-width: 38%;
+  }
+}
+.cache-tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: min(280px, 70vw);
+  padding: 8px 10px;
+  background: #2b2b2b;
+  color: #fff;
+  border-radius: 6px;
+  z-index: 20;
+}
+.idle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #555;
+  cursor: pointer;
+}
+.idle-desc {
+  display: block;
+  color: #bbb;
+  margin-top: 2px;
+}
+.drawer {
+  width: 280px;
+  max-width: 85vw;
+  border-right: 1px solid var(--line);
+  background: var(--side);
+  overflow-y: auto;
+}
+@media (max-width: 899px) {
+  .drawer {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 5;
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
+  }
+}
+.ws-main {
+  position: relative; /* for the drop hint */
+  flex: 1;
+  min-width: 0;
+  /* In the editor panel's column a flex child grows to its content unless
+     told it may shrink; without this a long transcript ran past the box,
+     was clipped, and could not scroll (seen in use). */
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Session. */
+.session {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+/* Files dragged over a session: a veil saying where they go. */
+.drop-veil {
+  position: absolute;
+  inset: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent-soft) 82%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 15;
+}
+.drop-veil span {
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+}
+.transcript {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 14px 16px;
+  min-height: 0;
+}
+.transcript > * {
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.older {
+  display: block;
+  margin: 4px auto 8px;
+}
+/* The composer lines up with the conversation's column (the transcript's
+   1200 px, 14 px from the edges), so the box sits under the prompts. The
+   cap keeps lines readable on a wide screen with the explorer hidden. */
+.composer {
+  padding: 6px 14px calc(6px + env(safe-area-inset-bottom));
+  flex-shrink: 0;
+}
+.composer > * {
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.composer-box {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 4px 3px 10px;
+}
+/* The "/" menu, above the box, as wide as it. */
+.slash-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: min(50dvh, 360px);
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
+  padding: 4px;
+  z-index: 20;
+}
+.slash-row {
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.slash-row.on {
+  background: var(--chip-on);
+}
+.slash-name {
+  font-family: var(--mono);
+  font-size: 13.5px;
+}
+.slash-desc {
+  margin-top: 1px;
+}
+.composer-box textarea {
+  width: 100%;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: none;
+  padding: 2px 0;
+}
+.composer-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* A tab being dragged rides above the others. */
+.tab.dragging { z-index: 2; opacity: .85; cursor: grabbing; box-shadow: 0 2px 8px rgba(0, 0, 0, .2); pointer-events: none; }
+/* The row's chips a size down, so they sit quietly under the text. */
+.composer-row .chip-btn,
+.composer-row .chip {
+  font-size: 12px;
+  padding: 1px 8px;
+}
+.composer-row .cache-clock,
+.composer-row .box-info {
+  font-size: 11.5px;
+}
+.chip {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--side);
+  padding: 2px 6px;
+  font-size: 13px;
+  max-width: 40%;
+}
+.send {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--run);
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+}
+.send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.send.stop {
+  background: var(--text);
+  font-size: 13px;
+}
+/* A stop tapped: the square pulses until the turn ends. */
+.send.stopping {
+  opacity: 0.6;
+  animation: stopping 1s ease-in-out infinite alternate;
+}
+@keyframes stopping {
+  to {
+    opacity: 0.25;
+  }
+}
+.attachments {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  margin-bottom: 6px;
+}
+/* Background tasks, above the box: each with a pulsing dot and a stop. */
+.tasks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.task {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  font-size: 12.5px;
+  color: var(--faint);
+  background: var(--side);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0 2px 0 10px;
+}
+/* Messages queued while a turn runs, above the box, oldest first. */
+.queued {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.queued-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  background: var(--side);
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 2px 2px 2px 10px;
+}
+/* A process a turn left running: solid, it is a fact, not a plan. */
+.leftovers .queued-item {
+  border-style: solid;
+}
+.task-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  animation: pulse 2s ease-in-out infinite;
+}
+.attachment {
+  position: relative;
+  flex-shrink: 0;
+}
+.attachment img {
+  height: 64px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+}
+.attachment .tab-x {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+}
+/* The model picker: a chip in the composer, a panel above it. */
+.picker {
+  position: relative;
+  min-width: 0;
+}
+.chip-btn {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--side);
+  padding: 2px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chip-btn.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text);
+}
+/* The explorer's sort switch, beside FILES. */
+.files-sort {
+  display: flex;
+  gap: 4px;
+  margin-right: 8px;
+}
+.files-sort .chip-btn {
+  font-size: 12px;
+  padding: 1px 8px;
+}
+/* Browse: the sort switch above the list, a folder icon on each row. */
+.sort-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px 0;
+}
+.browse-dir {
+  gap: 8px;
+}
+.folder-icon {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.tree-row .folder-icon {
+  margin-right: 4px;
+}
+.ultra-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--run);
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.picker-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: -40px;
+  width: min(380px, calc(100vw - 24px));
+  max-height: 60dvh;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
+  padding: 6px;
+  z-index: 20;
+}
+.picker-head {
+  padding: 4px 10px;
+}
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.picker-row:hover,
+.picker-row.on {
+  background: var(--side);
+}
+.picker-row.on {
+  background: var(--chip-on);
+}
+.picker-row.static {
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  margin-top: 4px;
+}
+.check {
+  font-size: 16px;
+}
+.effort {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--side);
+  border-radius: 12px;
+  padding: 4px 8px;
+}
+.effort-step {
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--knob-off);
+  cursor: pointer;
+  font-size: 0;
+}
+.effort-step.on {
+  background: var(--text);
+  width: 16px;
+  height: 16px;
+}
+.effort-default {
+  margin-right: 8px;
+  padding: 3px 8px;
+  border: 1px solid var(--knob-off);
+  border-radius: 10px;
+  background: none;
+  font-size: 11px;
+  color: var(--faint);
+  cursor: pointer;
+}
+.effort-default.on {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+.switch {
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--knob-off);
+  position: relative;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: left 0.2s;
+}
+.switch.on {
+  background: var(--accent);
+}
+.switch.on::after {
+  left: 18px;
+}
+.row-buttons.left {
+  justify-content: flex-start;
+  align-items: center;
+  margin-top: 6px;
+}
+.btn.danger {
+  background: var(--err);
+  border-color: var(--err);
+  color: #fff;
+}
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(90px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+  padding: 8px 10px 8px 14px;
+  background: #2b2b2b;
+  color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  z-index: 30;
+  font-size: 14px;
+}
+.tab-x.light {
+  color: #ccc;
+}
+.toast .btn {
+  background: #fff;
+  color: #1f1f1f;
+  border-color: #fff;
+}
+/* On a phone the picker spans the screen above the composer. */
+@media (max-width: 600px) {
+  .picker-panel {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    width: auto;
+    bottom: calc(110px + env(safe-area-inset-bottom));
+  }
+}
+.row-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.warnbox {
+  background: var(--tint-warn);
+  color: var(--text);
+}
+.permission {
+  border-top: 2px solid var(--run);
+  padding: 10px 14px;
+  background: var(--side);
+  max-height: 45dvh;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+.perm-title {
+  margin-bottom: 4px;
+}
+.perm-input {
+  margin-top: 6px;
+  max-height: 25dvh;
+  overflow: auto;
+}
+.perm-input > .pre {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+.diff-old {
+  background: var(--tint-err) !important;
+}
+.diff-new {
+  background: var(--tint-ok) !important;
+}
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 14px;
+}
+.filter-row .filter {
+  flex: 1;
+  min-width: 0;
+}
+.filter-row .up {
+  margin-left: 14px;
+}
+.filter-row .up + .filter {
+  margin-left: 0;
+}
+.filter.wide {
+  width: 100%;
+  margin: 8px 0 0;
+}
+.sheet-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--line);
+}
+.prompt.pending {
+  opacity: 0.6;
+}
+.head-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.pre-line {
+  white-space: pre-line;
+}
+
+.item-wrap {
+  margin: 10px auto;
+}
+/* More air before each of your prompts than within a turn. */
+.item-wrap:has(> .prompt) {
+  margin-top: 24px;
+}
+.stamp {
+  text-align: center;
+  font-size: 12px;
+  color: var(--faint);
+  margin-bottom: 6px;
+}
+/* Your prompts: a tinted card with an accent bar, so each turn's start
+   stands out from Claude's plain text. */
+.prompt {
+  border-left: 3px solid var(--accent);
+  border-radius: 4px 8px 8px 4px;
+  padding: 9px 12px;
+  background: var(--accent-soft);
+}
+.prompt-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.reply {
+  padding: 0 2px;
+  overflow-wrap: anywhere;
+}
+.reply.live {
+  margin: 10px auto;
+}
+/* Copy, under each reply: quiet until wanted, big enough for a thumb. */
+.reply-actions {
+  display: flex;
+  margin: 2px 0 4px -8px;
+}
+.copy-btn {
+  background: none;
+  border: none;
+  color: var(--faint);
+  font: inherit;
+  font-size: 12.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.copy-btn.copied {
+  color: var(--accent);
+}
+.copy-btn:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.working {
+  margin-top: 4px;
+}
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.7);
+  cursor: zoom-out;
+}
+.lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+}
+/* Images in the conversation as tiny thumbnails, just enough to see one
+   is there; a click shows them large in a popup (.lightbox). Cropped to a
+   fixed box, so a wide screenshot is not a thin strip. */
+.thumb {
+  height: 32px;
+  width: 44px;
+  object-fit: cover;
+  object-position: top left;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  margin: 4px 6px 4px 0;
+  vertical-align: top;
+  cursor: zoom-in;
+}
+.pre {
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.thinking {
+  margin: 6px 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+  color: var(--faint);
+  font-style: italic;
+  font-size: 13.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+.thinking.open {
+  display: block;
+  cursor: default;
+}
+.tool {
+  margin: 3px 0;
+  font-size: 13.5px;
+}
+.tool-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--faint);
+}
+.tool-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex-shrink: 0;
+}
+.tool.failed .tool-dot {
+  background: var(--err);
+}
+.tool.pending .tool-dot {
+  background: var(--line);
+}
+.tool-body {
+  margin: 4px 0 8px 15px;
+  padding: 6px 8px;
+  background: var(--side);
+  border-radius: 4px;
+  max-height: 60vh;
+  overflow: auto;
+}
+.result {
+  margin-top: 6px;
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+.notice {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13.5px;
+  margin: 8px auto;
+}
+.notice.error {
+  background: var(--tint-err);
+  color: var(--err);
+}
+/* An install or sign-in command to type, inside a notice. */
+.notice code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  user-select: all;
+  overflow-wrap: anywhere;
+}
+.notice.info {
+  color: var(--faint);
+  font-style: italic;
+}
+/* A background task's news (it ended, a monitor printed): what woke Claude. */
+.notice.task {
+  color: var(--faint);
+  font-size: 13px;
+  white-space: pre-line;
+  border-left: 2px solid var(--line);
+  padding: 2px 0 2px 10px;
+}
+/* A slash command's printout (/context, /usage). */
+.notice.output {
+  background: var(--side);
+  border: 1px solid var(--line);
+  padding: 10px 14px;
+  font-size: 14px;
+}
+.divider {
+  text-align: center;
+  color: var(--faint);
+  font-size: 12.5px;
+  border-top: 1px solid var(--line);
+  margin: 16px 0 8px;
+  padding-top: 4px;
+  cursor: pointer;
+}
+
+/* Files. */
+.explorer {
+  padding-bottom: 12px;
+  font-size: 13.5px;
+}
+.explorer-head {
+  padding: 8px 12px 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 26px;
+  padding-right: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tree-row:hover {
+  background: var(--line);
+}
+.tree-row.current {
+  background: var(--tint-current);
+}
+.tree-caret {
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--faint);
+  font-size: 11px;
+}
+.file-slot {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.file-slot[hidden] {
+  display: none;
+}
+.file-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.file-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 14px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.small-btn {
+  padding: 2px 10px;
+  font-size: 13px;
+}
+.code-view {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.file-md {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px 40px;
+}
+.file-md > .md {
+  max-width: 860px;
+  margin: 0 auto;
+}
+.file-md img {
+  max-width: 100%;
+}
+.file-image {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+  text-align: center;
+}
+.file-image img {
+  max-width: 100%;
+}
+/* Word documents: docx-preview's pages on the same grey as a PDF's. */
+.file-docx {
+  flex: 1;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  background: var(--pdf-around);
+  overscroll-behavior: contain;
+}
+.file-docx > div:last-child {
+  transform-origin: top left;
+}
+.file-docx .docx-wrapper {
+  background: none;
+  padding: 10px 0 20px;
+}
+.file-docx section.docx {
+  margin: 0 auto 10px;
+  color: #000; /* black on the white page, also in the dark theme */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+.pdf-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.pdf-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 14px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.badge {
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--tint-current);
+  color: var(--accent);
+}
+.badge.warn {
+  background: var(--tint-warn);
+  color: var(--warn);
+}
+.pdf-pages {
+  flex: 1;
+  overflow: auto;
+  /* Reserve the scrollbar from the start, so fit-width is not computed
+     on a width that shrinks once pages arrive. */
+  scrollbar-gutter: stable;
+  background: var(--pdf-around);
+  padding: 0 12px;
+  overscroll-behavior: contain;
+}
+.pdf-pages.fit {
+  overflow-x: hidden;
+}
+.pdf-page {
+  margin: 10px auto 0;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+.pdf-page:last-child {
+  margin-bottom: 10px;
+}
+.pdf-page {
+  position: relative;
+}
+.pdf-canvas,
+.pdf-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.pdf-pages.syncing .pdf-page,
+.pdf-pages.syncing .textLayer span {
+  cursor: crosshair;
+}
+.pdf-link {
+  position: absolute;
+  z-index: 2;
+}
+.pdf-link:hover {
+  background: rgba(0, 95, 184, 0.08);
+}
+.pdf-flash {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  border-radius: 3px;
+  background: rgba(255, 200, 0, 0.35);
+  box-shadow: 0 0 0 2px rgba(255, 170, 0, 0.8);
+  animation: pdf-flash 2.5s ease-out forwards;
+}
+/* Find: the bar under the PDF's, and the match being shown. */
+.pdf-view:focus {
+  outline: none;
+}
+.pdf-find {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 14px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.pdf-find .filter {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 4px 8px;
+}
+.pdf-hit {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  border-radius: 3px;
+  background: rgba(255, 200, 0, 0.35);
+  box-shadow: 0 0 0 2px rgba(255, 170, 0, 0.8);
+}
+/* Find in a Word file: every match, and the one shown. */
+::highlight(docx-find) {
+  background-color: rgba(255, 200, 0, 0.35);
+}
+::highlight(docx-find-cur) {
+  background-color: rgba(255, 150, 0, 0.75);
+}
+@keyframes pdf-flash {
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.btn.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.sync-gutter .cm-lineNumbers .cm-gutterElement {
+  cursor: pointer;
+}
+.sync-gutter .cm-lineNumbers .cm-gutterElement:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* pdf.js's text layer: transparent text laid over the drawn page, so it
+   can be selected and copied. pdf.js sets --font-height, --scale-x and
+   --rotate on each span; the page sets --total-scale-factor. */
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  transform-origin: 0 0;
+  z-index: 1;
+  forced-color-adjust: none;
+}
+.textLayer span,
+.textLayer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.textLayer > :not(.markedContent),
+.textLayer .markedContent span:not(.markedContent) {
+  z-index: 1; /* above the end marker, which covers the page mid-drag */
+  font-size: calc(var(--total-scale-factor) * var(--font-height, 0px));
+  transform: rotate(var(--rotate, 0deg)) scaleX(var(--scale-x, 1));
+}
+.textLayer .markedContent {
+  display: contents;
+}
+.textLayer ::selection {
+  background: rgba(0, 95, 255, 0.25);
+  color: transparent;
+}
+.textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+/* While a selection is being dragged, pdf.js marks the layer "selecting";
+   the end marker then covers the page, so dragging past the end of a line
+   does not run the selection on to the end of the page (seen in Chrome). */
+.textLayer.selecting .endOfContent {
+  top: 0;
+}
+/* The line a jump from the PDF landed on, for a few seconds. */
+.code-view.jumped .cm-activeLine {
+  background: var(--tint-jump);
+  transition: background 0.4s;
+}
+.md .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* Markdown. */
+.md > :first-child {
+  margin-top: 0;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
+.md p,
+.md ul,
+.md ol {
+  margin: 0.5em 0;
+}
+.md pre {
+  background: var(--side);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12.5px;
+}
+/* A code block's Copy button: in the corner, shown on hover (always, faint,
+   on a touch screen), outside the pre so it stays put when the code
+   scrolls sideways. */
+.md .code-block {
+  position: relative;
+  margin: 1em 0;
+}
+.md .code-block > pre {
+  margin: 0;
+}
+.code-copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--side);
+  color: var(--faint);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.code-block:hover .code-copy,
+.code-copy:focus-visible,
+.code-copy.copied,
+.code-copy.failed {
+  opacity: 1;
+}
+@media (hover: none) {
+  .code-copy {
+    opacity: 0.6;
+  }
+}
+.code-copy:hover {
+  color: var(--text);
+}
+.code-copy svg + svg,
+.code-copy.copied svg:first-child {
+  display: none;
+}
+.code-copy.copied svg + svg {
+  display: block;
+}
+.code-copy.copied {
+  color: var(--accent);
+}
+.code-copy.failed {
+  color: var(--err);
+}
+.md code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+.md :not(pre) > code {
+  background: var(--side);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.md table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+.md th,
+.md td {
+  border: 1px solid var(--line);
+  padding: 3px 8px;
+}
+.md a {
+  color: var(--accent);
+}
+.md blockquote {
+  margin: 0.5em 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--line);
+  color: var(--faint);
+}

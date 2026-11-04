@@ -1,0 +1,36 @@
+# On a version tag (v0.1.0) in the public repo, dakort-app/dakort, where
+# scripts/publish.sh puts one commit per release: GoReleaser builds every
+# platform, drafts the GitHub release, and pushes the Homebrew cask and
+# Scoop manifest to the tap repos with TAP_TOKEN (a fine-grained token
+# with contents write on dakort-app/homebrew-tap and dakort-app/scoop-bucket,
+# kept as a secret of the public repo). The same tag on the dev repo does
+# nothing here.
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.repository == 'dakort-app/dakort'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}

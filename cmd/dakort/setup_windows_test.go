@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net"
 	"net/http"
 	"os"
@@ -108,6 +110,30 @@ func TestRealSetup(t *testing.T) {
 	out3, err := exec.Command(filepath.Join(home, "bin", "dakort.exe"), common...).CombinedOutput()
 	if err != nil || !strings.Contains(string(out3), "is running this build") {
 		t.Errorf("setup from the installed binary: %v %s", err, out3)
+	}
+
+	// dakort update, from a fake GitHub: the release's zip is fetched,
+	// checked, its binary staged, and the server restarts with it.
+	exe3 := filepath.Join(t.TempDir(), "dakort.exe")
+	if out, err := exec.Command("go", "build", "-ldflags", "-X main.version=v0.0.3-test", "-o", exe3, ".").CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	bin3, _ := os.ReadFile(exe3)
+	archive, archiveName := pack(t, bin3, "0.0.3-test")
+	sum := sha256.Sum256(archive)
+	gh := fakeGitHub(t, "v0.0.3-test", archive, archiveName, hex.EncodeToString(sum[:])+"  "+archiveName+"\n")
+	outU, err := exec.Command(filepath.Join(home, "bin", "dakort.exe"), "update", "-tag", "v0.0.3-test", "-api", gh.URL,
+		"-name", name, "-home", home, "-data", data, "-port", port).CombinedOutput()
+	t.Logf("dakort update:\n%s", outU)
+	if err != nil || !strings.Contains(string(outU), "restarted with v0.0.3-test") {
+		logText, _ := os.ReadFile(filepath.Join(home, "logs", "server.log"))
+		t.Errorf("dakort update: %v %s\nserver log:\n%s", err, outU, logText)
+	}
+	if _, err := os.Stat(filepath.Join(home, "bin", "dakort.exe.new")); err == nil {
+		t.Error("the fetched build was not swapped in")
+	}
+	if got, _ := exec.Command(filepath.Join(home, "bin", "dakort.exe"), "-version").Output(); !strings.Contains(string(got), "v0.0.3-test") {
+		t.Errorf("installed binary says %q after update", got)
 	}
 
 	// Cold path over a running task: a changed definition (another port,

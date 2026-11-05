@@ -36,6 +36,7 @@ export type State = {
   cacheLife: Record<string, string> // per session: the prompt cache its replies write to, "1h" or "5m"
   finished: string[] // sessions that finished a turn while not on screen, newest last
   tabs: Record<string, string[]> // per folder (folderKey): its open tabs, shared by every device; absent until asked for
+  latest: string // a newer release's tag, once the server has found one; '' until then
 }
 
 let state: State = {
@@ -53,6 +54,7 @@ let state: State = {
   cacheLife: {},
   finished: [],
   tabs: {},
+  latest: '',
 }
 const listeners = new Set<() => void>()
 
@@ -279,6 +281,10 @@ function handle(e: Ev) {
       catchUp()
       for (const folder of Object.keys(state.tabs)) loadSharedTabs(folder)
       if (e.build) newBuild(e.build)
+      if (e.latest) set({ latest: e.latest })
+      break
+    case 'release':
+      set({ latest: e.latest ?? '' })
       break
     case 'tabs':
       if (e.folder) set({ tabs: { ...state.tabs, [folderKey(e.folder)]: e.tabs ?? [] } })

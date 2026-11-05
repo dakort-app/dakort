@@ -143,4 +143,5 @@ export type Ev = {
   folder?: string // tabs: the folder whose open tabs changed
   tabs?: string[] // tabs: its open tabs now (absent: none)
   build?: string // snapshot: the server's version; a page from another build reloads itself once hidden
+  latest?: string // release, snapshot: a newer release's tag
 }

@@ -28,6 +28,7 @@ import (
 //	tasks           Tasks: the session's background tasks now (empty: none left)
 //	queue           Queue: the session's messages waiting for its turn to end (queue.go)
 //	leftovers       Leftovers: processes the session's last turn left running (leftovers.go)
+//	release         Latest: a newer release's tag (release.go)
 //	snapshot        Turns: every running turn's partial blocks and pending
 //	                permissions. Background: each session's background tasks.
 //	                Queues: each session's queued messages. AllLeftovers: each
@@ -59,6 +60,7 @@ type Ev struct {
 	Folder       string                  `json:"folder,omitempty"`       // tabs: the folder whose open tabs changed (tabs.go)
 	Tabs         []string                `json:"tabs,omitempty"`         // tabs: its open tabs now (none: empty)
 	Build        string                  `json:"build,omitempty"`        // snapshot: the server's version; a page loaded from another build reloads once hidden
+	Latest       string                  `json:"latest,omitempty"`       // release, snapshot: a newer release's tag (release.go)
 }
 
 type Permission struct {
@@ -133,6 +135,7 @@ type hub struct {
 	queue map[string][]Queued     // by session
 	left  map[string][]procs.Info // by session
 	build string                  // the server's version, in every snapshot: a page from an older build reloads itself
+	latest string                 // a newer release's tag, once found (release.go), in every snapshot
 }
 
 func newHub() *hub {
@@ -281,7 +284,7 @@ func (h *hub) subscribe(last string) (s *sub, replay []event, snap *event) {
 	for s, l := range h.left {
 		left[s] = l
 	}
-	data, _ := json.Marshal(Ev{Type: "snapshot", Turns: turns, Background: bg, Queues: qs, AllLeftovers: left, Gap: last != "", Build: h.build})
+	data, _ := json.Marshal(Ev{Type: "snapshot", Turns: turns, Background: bg, Queues: qs, AllLeftovers: left, Gap: last != "", Build: h.build, Latest: h.latest})
 	return s, nil, &event{seq: h.seq, id: fmt.Sprintf("%s-%d", h.epoch, h.seq), data: data}
 }
 

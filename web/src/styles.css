@@ -1607,6 +1607,12 @@ html.tab-dragging * {
   color: var(--faint);
   font-style: italic;
 }
+/* A newer release, under the folder list (FolderBar.tsx). */
+.notice.release {
+  margin: 2px 10px 6px;
+  padding: 2px 0;
+  font-size: 12.5px;
+}
 /* A background task's news (it ended, a monitor printed): what woke Claude. */
 .notice.task {
   color: var(--faint);

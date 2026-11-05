@@ -166,24 +166,7 @@ func setup(o setupOpts) error {
 		if err != nil {
 			return fmt.Errorf("asking the server to restart: %w", err)
 		}
-		if n > 0 {
-			fmt.Printf("new build staged; the server restarts with it once %d running turn(s) finish\n", n)
-			return nil
-		}
-		for i := 0; i < 60 && exists(svc.staged()); i++ {
-			time.Sleep(500 * time.Millisecond)
-		}
-		for i := 0; i < 60 && !answering(base); i++ {
-			time.Sleep(500 * time.Millisecond)
-		}
-		switch {
-		case exists(svc.staged()):
-			fmt.Printf("the server has not swapped the build in yet; see %s\n", svc.log())
-		case answering(base):
-			fmt.Printf("restarted with %s on %s; log: %s\n", version, base, svc.log())
-		default:
-			fmt.Printf("swapped, but not answering yet; see %s\n", svc.log())
-		}
+		handOver(os.Stdout, svc, base, version, n)
 		return nil
 	}
 

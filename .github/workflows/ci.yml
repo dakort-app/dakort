@@ -9,8 +9,7 @@
 name: ci
 on:
   push:
-    branches: [main]
-    tags: ["v*"]
+    branches: [main] # a release's tag sits on a main commit, checked already
   pull_request:
   workflow_dispatch:
 

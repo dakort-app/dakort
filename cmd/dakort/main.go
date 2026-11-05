@@ -38,10 +38,17 @@ var version = "dev"
 const oldName = "mini-ade-go"
 
 func main() {
-	// Subcommands: `dakort setup` (setup.go). No subcommand runs the server.
-	if len(os.Args) > 1 && os.Args[1] == "setup" {
-		setupMain(os.Args[2:])
-		return
+	// Subcommands: `dakort setup` (setup.go), `dakort update` (update.go).
+	// No subcommand runs the server.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "setup":
+			setupMain(os.Args[2:])
+			return
+		case "update":
+			updateMain(os.Args[2:])
+			return
+		}
 	}
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	// Loopback, plus this machine's Tailscale addresses (-tailscale), which
@@ -125,6 +132,7 @@ func main() {
 		Trash:      filepath.Join(cache, "trash"),
 		Settings:   filepath.Join(cfg, "sessions.json"),
 		Compact:    server.CompactConfig{On: *idleCompact},
+		Release:    server.ReleaseConfig{On: true},
 		WarmModels: true,
 		Version:    version,
 		Restart: func() {

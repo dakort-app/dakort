@@ -103,6 +103,7 @@ type Config struct {
 	PingEvery  time.Duration // pingEvery when zero
 	Restart    func()        // called once no turn runs after POST /api/restart; that route is off when nil
 	Compact    CompactConfig // idle compaction (compact.go); off unless On
+	Release    ReleaseConfig // the notice of a newer release (release.go); off unless On
 	WarmModels bool          // ask the CLIs for their model lists at start, for the picker
 	Version    string        // the build, told to every page in its snapshot (a page from an older build reloads itself)
 }
@@ -174,6 +175,10 @@ func New(c Config) *Server {
 	if c.Compact.On {
 		s.done.Add(1)
 		go s.compactLoop(c.Compact.withDefaults())
+	}
+	if c.Release.On {
+		s.done.Add(1)
+		go s.releaseLoop(c.Release.withDefaults())
 	}
 	return s
 }

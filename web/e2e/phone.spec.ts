@@ -1204,3 +1204,17 @@ test('the title counts finished work in its own folder only', async ({ page }) =
   await play({ type: 'turn', session: here!.id, state: 'done', result: { ok: true } })
   await expect(page).toHaveTitle(/^\(1\) /)
 })
+
+// A newer release shows under the folder list once the server says so (a
+// release event; the snapshot after a reconnect too), with the line to run
+// on the computer, so the phone learns of it without a terminal.
+test('a newer release is announced under the folder list', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'the explorer is a drawer on a phone')
+  await openSession(page, (l) => l[0])
+  const play = (ev: object) => page.evaluate((ev) => (window as any).made.stream.onEvent(ev), ev)
+  await expect(page.locator('.notice.release')).toHaveCount(0)
+  await play({ type: 'release', latest: 'v9.9.9' })
+  const notice = page.locator('.notice.release')
+  await expect(notice).toContainText('v9.9.9 is out')
+  await expect(notice).toContainText('dakort update')
+})

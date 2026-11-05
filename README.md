@@ -31,9 +31,19 @@ dakort setup
 
 That installs it as a background service that runs at boot, finds the
 Claude Code and Codex CLIs, shows the address for your phone as a QR code,
-and opens the page, which asks you to choose a password. Run it again
-after an update; the server restarts with the new build once nothing is
-running. `dakort setup -uninstall` removes the service.
+and opens the page, which asks you to choose a password.
+`dakort setup -uninstall` removes the service.
+
+When a newer release is out, the page says so. Then, on the computer:
+
+```
+dakort update
+```
+
+It fetches the release, checks it, and restarts the service with it once
+nothing is running. (After an update through brew, winget or scoop, run
+`dakort setup` again instead; it does the same hand-over with the new
+binary.)
 
 ## What it needs
 

@@ -230,7 +230,22 @@ export function FolderList({ current, hide }: { current: string; hide?: ReactNod
           )}
         </>
       )}
+      <ReleaseNotice />
       {sheet}
+    </div>
+  )
+}
+
+// ReleaseNotice says a newer release is out, once the server has heard of
+// one (a release event, or the snapshot), with the line to run on the
+// computer. Under the folder list, so every device sees it and it never
+// covers the work.
+function ReleaseNotice() {
+  const latest = useStore((s) => s.latest)
+  if (!latest) return null
+  return (
+    <div className="notice info release">
+      Dakort {latest} is out. On the computer: <code>dakort update</code>
     </div>
   )
 }

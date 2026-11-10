@@ -12,6 +12,7 @@ name: ci
 on:
   push:
     branches: [main] # a release's tag sits on a main commit, checked already
+    paths-ignore: ["**.md", "docs/**"] # prose and GIFs change nothing CI checks
   pull_request:
   workflow_dispatch:
 

@@ -120,6 +120,28 @@ Windows, `dakort setup -at-boot` runs it before anyone logs in, for a
 machine nobody signs in to. Codex's shell commands do not work there; its
 sandbox needs a signed-in desktop.
 
+### The phone
+
+Dakort reaches your phone through [Tailscale](https://tailscale.com), a
+private network between your own devices. It is free for personal use
+and needs no router settings, no port forwarding and no public address.
+Nothing is exposed to the internet; only devices signed in to your
+Tailscale account can see the computer at all.
+
+1. Install Tailscale on the computer and on the phone, from
+   tailscale.com/download or the app store, and sign both in with the
+   same account.
+2. Run `dakort setup` on the computer. It prints the phone's address and
+   a QR code.
+3. Scan the code with the phone, or type the address. The page asks for
+   the password you chose on the computer, once per device.
+
+If Tailscale came after Dakort, run `dakort setup` again and it picks the
+tailnet up. The connection is encrypted by Tailscale itself; the page
+goes over plain HTTP inside it. For HTTPS on the tailnet, with the lock
+icon, `dakort setup -https` puts it behind Tailscale Serve, which needs
+HTTPS certificates enabled in your Tailscale admin console.
+
 ### Updating
 
 The page says when a newer release is out. Then, on the computer:

@@ -6,7 +6,8 @@ import { useSyncExternalStore } from 'react'
 import { api, AuthError } from './api'
 import { learnWindow } from './contextwindow'
 import { applyEvent, emptyLive, type Live } from './live'
-import { finishedIn, flat, folderKey, followMoves, isUnread, loadTabs as loadLocalTabs, movedPath } from './local'
+import { showFavicon } from './favicon'
+import { finishedIn, flat, folderKey, followMoves, isUnread, loadTabs as loadLocalTabs, movedPath, sameFolder } from './local'
 import { folderHash, parseRoute } from './route'
 import { Stream, type StreamState } from './stream'
 import type { Ev, Folder, Move, Session } from './types'
@@ -202,10 +203,10 @@ export function dismissFinished(id: string) {
 }
 
 // The page title names the folder on screen, so Chrome tabs open on
-// different folders tell apart, and carries how many of that folder's
-// sessions finished unseen: "(2) megi · Dakort". Only that folder's: when
-// every tab counted every finish, three tabs on three projects all said
-// (1) and none said where. The home screen, on no folder, counts them all.
+// different folders tell apart. The tab's icon marks a turn finished unseen
+// in that folder only: when every tab marked every finish, three tabs on
+// three projects all said so and none said where. The home screen, on no
+// folder, marks them all.
 let place = ''
 let placeFolder = ''
 export function setPlace(name: string, folder = '') {
@@ -214,10 +215,25 @@ export function setPlace(name: string, folder = '') {
   showCount()
 }
 
+// The title is just the folder's name ("Dakort" at home): the tab's icon
+// says it is Dakort and whether a turn finished unseen, so neither a
+// suffix nor a count takes the tab's narrow width any more.
 function showCount() {
-  const n = finishedIn(state.finished, state.sessions, placeFolder)
-  document.title = (n ? `(${n}) ` : '') + (place ? `${place} · ` : '') + 'Dakort'
+  document.title = place || 'Dakort'
+  showIcon()
 }
+
+// The tab's icon by the same rule as the count: a turn finished unseen in
+// this tab's folder (every folder, at home), else one running there or
+// background tasks (agents, commands) that outlived their turn: those
+// once left the icon idle while agents worked.
+function showIcon() {
+  const here = (id: string) => !placeFolder || sameFolder(state.sessions.find((s) => s.id === id)?.folder, placeFolder)
+  const working = [...Object.keys(state.live.turns), ...Object.keys(state.live.tasks)].some(here)
+  if (finishedIn(state.finished, state.sessions, placeFolder)) showFavicon('done')
+  else showFavicon(working ? 'run' : 'idle')
+}
+listeners.add(showIcon)
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return
@@ -279,7 +295,6 @@ function handle(e: Ev) {
       // A fresh connect or a gap: lists and transcripts may be behind.
       refreshLists()
       catchUp()
-      for (const folder of Object.keys(state.tabs)) loadSharedTabs(folder)
       if (e.build) newBuild(e.build)
       if (e.latest) set({ latest: e.latest })
       break
@@ -314,11 +329,11 @@ let stream: Stream | null = null
 
 export function startStore() {
   if (stream) return
-  stream = new Stream(handle, (s) => set({ stream: s }))
+  stream = new Stream(handle, streamState)
   stream.start()
   refreshLists()
   // For poking at from the browser console.
-  Object.assign(window, { made: { getState, stream, events } })
+  Object.assign(window, { dakort: { getState, stream, events } })
 }
 
 // The last few events, newest last, for the console.
@@ -330,10 +345,25 @@ const events: Ev[] = []
 // before carries its tabs over. Changes made here go up at once; changes
 // made elsewhere arrive as tabs events.
 
+// Out of touch, a page's lists may be behind: it hears no tabs events, and
+// a reconnect replays the missed events, not the lists. A phone waking with
+// the list from before it slept sent that list up and closed, on every
+// device, the tabs opened meanwhile. So the lists go when the stream does
+// (shareTabs sends nothing for a folder without one) and come back fresh
+// from the server when it is open again.
+const followed = new Set<string>()
+function streamState(s: StreamState) {
+  if (s !== 'open' && state.stream === 'open') set({ tabs: {} })
+  if (s === 'open' && state.stream !== 'open') for (const folder of followed) loadSharedTabs(folder)
+  set({ stream: s })
+}
+
 export async function loadSharedTabs(folder: string) {
+  followed.add(folder)
   const key = folderKey(folder)
   try {
     const { ids } = await api.tabs(folder)
+    if (state.stream !== 'open') return // asked again once it is
     if (ids) {
       set({ tabs: { ...state.tabs, [key]: ids } })
       return

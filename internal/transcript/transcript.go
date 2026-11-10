@@ -613,7 +613,8 @@ func Head(path string, maxBytes int64) (Info, error) {
 	return info, nil
 }
 
-// LastActivity is the time of the last user or assistant row, read from the
+// LastActivity is the time of the last user or assistant row, not counting
+// the rows a compaction writes, read from the
 // end of the file; zero when there is none. It is not the file's mtime: the
 // CLI appends cost, mode and title lines after the last row, sometimes
 // weeks later when a session is reopened without a turn.
@@ -650,18 +651,45 @@ func lastActivity(path string, p parser) (time.Time, error) {
 		if start > 0 {
 			first = 1
 		}
+		var cand time.Time // the latest user row, unless it turns out to be a compaction's
+		users, typed := 0, false
 		for i := len(lines) - 2; i >= first; i-- {
 			for _, row := range p.rows(lines[i], 0, 0) {
-				if row.Role == User || row.Role == Assistant {
-					return row.Time, nil
+				switch {
+				case row.Role == Assistant:
+					if cand.IsZero() {
+						return row.Time, nil
+					}
+					return cand, nil
+				case row.Role == User:
+					if cand.IsZero() {
+						cand = row.Time
+					}
+					typed = typed || row.PromptText() != ""
+					if users++; users > compactRows {
+						return cand, nil
+					}
+				case row.Subtype == "compact_boundary" && !p.codex: // Codex has no idle compaction
+					// The user rows after it, with no reply and nothing
+					// typed, are the compaction's own (summary, /compact and
+					// its output): housekeeping, which must not light up a
+					// session at night.
+					if typed {
+						return cand, nil
+					}
+					cand, users = time.Time{}, 0
 				}
 			}
 		}
 		if start == 0 {
-			return time.Time{}, nil
+			return cand, nil
 		}
 	}
 }
+
+// compactRows bounds the search for a compaction behind trailing user rows:
+// a compaction writes four (summary, caveat, command, output).
+const compactRows = 16
 
 // Used is what a session last ran with, whichever client sent it (this
 // app, a terminal, VS Code): the model of the last real reply and the

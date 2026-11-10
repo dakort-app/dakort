@@ -1,3 +1,4 @@
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import { defaultHighlightStyle, StreamLanguage, syntaxHighlighting, type LanguageSupport } from '@codemirror/language'
 import { Compartment, EditorState, type Extension } from '@codemirror/state'
@@ -6,8 +7,8 @@ import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirro
 import { useEffect, useRef } from 'react'
 import { isDark, onTheme } from './theme'
 
-// A read-only code view (CodeMirror 6: Monaco is poor on touch). Languages
-// load by file extension the first time they are needed.
+// The code view (CodeMirror 6: Monaco is poor on touch), read-only unless
+// editing. Languages load by file extension the first time they are needed.
 
 const coarse = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
 
@@ -56,15 +57,31 @@ type Props = {
   jump?: { line?: number; n: number } // scroll to and mark this line
   visible?: boolean // a hidden tab cannot scroll; the jump waits for this
   onLineClick?: (line: number) => void // a click on a line number
+  // Editing: typing changes the text, onEdit is told of each change (not
+  // of a new text prop), Ctrl+S or Cmd+S calls onSave, and doc reads the
+  // text out.
+  editing?: boolean
+  onEdit?: () => void
+  onSave?: () => void
+  doc?: { current: (() => string) | null }
 }
 
-export function CodeView({ path, text, jump, visible = true, onLineClick }: Props) {
+const lock = (editing: boolean): Extension =>
+  editing ? [history(), keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab])] : [EditorState.readOnly.of(true), EditorView.editable.of(false)]
+
+export function CodeView({ path, text, jump, visible = true, onLineClick, editing = false, onEdit, onSave, doc }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
   const lang = useRef(new Compartment())
   const scheme = useRef(new Compartment())
+  const mode = useRef(new Compartment())
   const clickRef = useRef(onLineClick)
   clickRef.current = onLineClick
+  const editRef = useRef(onEdit)
+  editRef.current = onEdit
+  const saveRef = useRef(onSave)
+  saveRef.current = onSave
+  const outside = useRef(false) // a change from the text prop, not typing
 
   useEffect(() => {
     const v = new EditorView({
@@ -72,8 +89,10 @@ export function CodeView({ path, text, jump, visible = true, onLineClick }: Prop
       state: EditorState.create({
         doc: text,
         extensions: [
-          EditorState.readOnly.of(true),
-          EditorView.editable.of(false),
+          mode.current.of(lock(editing)),
+          EditorView.updateListener.of((u) => {
+            if (u.docChanged && !outside.current) editRef.current?.()
+          }),
           lineNumbers({
             domEventHandlers: {
               click: (v, block) => {
@@ -95,6 +114,7 @@ export function CodeView({ path, text, jump, visible = true, onLineClick }: Prop
       }),
     })
     view.current = v
+    if (doc) doc.current = () => v.state.doc.toString()
     let dead = false
     languages[extOf(path)]?.().then((ext) => {
       if (!dead) v.dispatch({ effects: lang.current.reconfigure(ext) })
@@ -105,15 +125,25 @@ export function CodeView({ path, text, jump, visible = true, onLineClick }: Prop
       offTheme()
       v.destroy()
       view.current = null
+      if (doc) doc.current = null
     }
   }, [path])
+
+  useEffect(() => {
+    const v = view.current
+    if (!v) return
+    v.dispatch({ effects: mode.current.reconfigure(lock(editing)) })
+    if (editing) v.focus()
+  }, [editing])
 
   // A refreshed file replaces the text and keeps the reader where they were.
   useEffect(() => {
     const v = view.current
     if (!v || v.state.doc.toString() === text) return
     const top = v.scrollDOM.scrollTop
+    outside.current = true
     v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: text } })
+    outside.current = false
     v.scrollDOM.scrollTop = top
   }, [text])
 
@@ -139,6 +169,17 @@ export function CodeView({ path, text, jump, visible = true, onLineClick }: Prop
   }, [visible])
 
   return (
-    <div className={'code-view' + (onLineClick ? ' sync-gutter' : '')} ref={host} title={onLineClick ? 'Click a line number to show it in the PDF' : undefined} />
+    <div
+      className={'code-view' + (onLineClick ? ' sync-gutter' : '')}
+      ref={host}
+      title={onLineClick ? 'Click a line number to show it in the PDF' : undefined}
+      // Ctrl+S or Cmd+S while editing saves, and never the browser's Save Page.
+      onKeyDownCapture={(e) => {
+        if (!editing || !(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== 's') return
+        e.preventDefault()
+        e.stopPropagation()
+        saveRef.current?.()
+      }}
+    />
   )
 }

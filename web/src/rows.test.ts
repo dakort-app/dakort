@@ -127,9 +127,9 @@ describe('grouping rows', () => {
   })
 })
 
-// Real rows, when MADE_ROWS names a dump of a session page (see BRIEF,
+// Real rows, when DAKORT_ROWS names a dump of a session page (see BRIEF,
 // piece 5). Not committed: transcripts are private.
-const dump = process.env.MADE_ROWS
+const dump = process.env.DAKORT_ROWS
 describe.skipIf(!dump)('grouping real rows', () => {
   it('covers every visible row once, in order, with unique keys', () => {
     const rows: Row[] = JSON.parse(readFileSync(dump!, 'utf8')).rows

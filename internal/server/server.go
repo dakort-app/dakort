@@ -15,6 +15,7 @@
 //	GET  /api/browse?path=P                    the folders inside P (home when omitted), for opening a new one
 //	POST /api/browse/mkdir                     {path, name}: make a new folder there to open
 //	GET  /api/files/list|raw|stat?root=R&path=P  a known folder's files (files.go)
+//	POST /api/files/save?root=R&path=P          {text, base}: write an edited text file (save.go)
 //	POST /api/sessions                        start a new session: {promptId, cwd, text, images, model, permissionMode}
 //	GET  /api/sessions/{id}/rows               ?before=OFF&n=N  older page (OFF omitted: the newest rows)
 //	                                           ?after=OFF       everything appended since OFF
@@ -24,7 +25,7 @@
 //	POST /api/sessions/{id}/interrupt          stops the turn; answers {queued}: the queue, taken back (queue.go)
 //	POST /api/sessions/{id}/unqueue/{promptId} a queued message taken back (queue.go)
 //	POST /api/sessions/{id}/leftovers/{pid}/stop ends a process a turn left running (leftovers.go)
-//	POST /api/sessions/{id}/settings           {idleCompact, effort, ultracode}: kept at once (compact.go)
+//	POST /api/sessions/{id}/settings           {idleCompact, effort, ultracode, chrome}: kept at once (compact.go)
 //	POST /api/sessions/{id}/rename             {title}: name it, through the CLI's /rename (compact.go)
 //	GET  /api/events?last=ID                   the event stream (Server-Sent Events)
 //	GET  /api/assets/{name}                    an image or PDF a row refers to
@@ -211,6 +212,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/files/list", s.listFiles)
 	mux.HandleFunc("GET /api/files/raw", s.rawFile)
 	mux.HandleFunc("GET /api/files/stat", s.statFile)
+	mux.HandleFunc("POST /api/files/open", s.openLocal)
+	mux.HandleFunc("POST /api/files/save", s.saveFile)
+	mux.HandleFunc("GET /api/here", s.here)
+	mux.HandleFunc("GET /api/files/archive", s.archiveFile)
 	mux.HandleFunc("GET /api/files/synctex/view", s.syncView)
 	mux.HandleFunc("GET /api/files/synctex/edit", s.syncEdit)
 	mux.HandleFunc("POST /api/sessions", s.newSession)
@@ -373,7 +378,8 @@ type sessionView struct {
 	Effort         string `json:"effort,omitempty"`
 	PermissionMode string `json:"permissionMode,omitempty"`
 	Ultracode      bool   `json:"ultracode,omitempty"`
-	IdleCompact    bool   `json:"idleCompact"` // compact when idle (compact.go); on unless switched off
+	Chrome         bool   `json:"chrome,omitempty"` // Claude in Chrome on for its turns
+	IdleCompact    bool   `json:"idleCompact"`      // compact when idle (compact.go); on unless switched off
 	// Seen: read up to this updated time, on any device (seen.go). The
 	// session is unread when Updated is later.
 	Seen time.Time `json:"seen"`
@@ -391,7 +397,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		}
 		st := s.runner.settingsOf(sess.ID)
 		out[i] = sessionView{Session: sess, Running: s.runner.running(sess.ID),
-			Model: st.model, Effort: st.effort, PermissionMode: st.permissionMode, Ultracode: st.ultracode,
+			Model: st.model, Effort: st.effort, PermissionMode: st.permissionMode, Ultracode: st.ultracode, Chrome: st.chrome,
 			IdleCompact: !st.noIdleCompact, Seen: s.seen.get(sess.ID)}
 		if sess.Cwd != "" {
 			out[i].Folder = paths[folderKey(sess.Cwd)]

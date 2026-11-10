@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { Composer, type FilesIn } from './Composer'
 import { PermissionCard } from './PermissionCard'
+import { PromptText } from './PromptText'
 import { showing, useStore } from './store'
 import { Transcript } from './Transcript'
 import type { Session } from './types'
@@ -67,7 +68,7 @@ export function SessionView({ id, session, folder, onStarted }: Props) {
           {pendingNew.map((p) => (
             <div key={p.id} className="item-wrap">
               <div className="prompt pending">
-                <div className="prompt-text">{p.text}</div>
+                <PromptText text={p.text} />
               </div>
             </div>
           ))}

@@ -37,7 +37,7 @@ const codexModes: [string, string, string][] = [
 const codexDontAsk: [string, string, string] = ['dontAsk', "Don't ask", 'Codex refuses anything the project sandbox does not allow']
 
 // The agent a new session starts with, remembered per browser.
-const providerKey = 'made.provider'
+const providerKey = 'dakort.provider'
 const lastProvider = () => localStorage.getItem(providerKey) || 'claude'
 // The same, kept current for the new-session tab's icon.
 const providerListeners = new Set<() => void>()
@@ -51,7 +51,7 @@ export const useLastProvider = () =>
 // clear the session's choice on the server instead of choosing manual.
 const realMode = (m?: string) => (m === 'default' ? 'manual' : m || '')
 
-const draftKey = (key: string) => 'made.draft:' + key
+const draftKey = (key: string) => 'dakort.draft:' + key
 // A draft's images, kept while the page lives: the composer goes with its
 // tab, and a screenshot pasted before a visit to another session was gone
 // on the way back. (Too big for localStorage, so a reload still loses them.)
@@ -87,6 +87,7 @@ export function Composer({ session, folder, onStarted, filesIn }: Props) {
     model: (used?.model ? aliasOf(used.model) : '') || session?.model || '',
     effort: session?.effort ?? '',
     ultracode: !!session?.ultracode,
+    chrome: !!session?.chrome,
   })
   const [choice, setChoice] = useState<Choice>(fromSession)
   const [mode, setMode] = useState(used?.mode || session?.permissionMode || '')
@@ -124,13 +125,13 @@ export function Composer({ session, folder, onStarted, filesIn }: Props) {
   // Each part on its own, so an effort saved below does not undo a model
   // picked and not yet sent.
   useEffect(() => setChoice((c) => ({ ...c, model: fromSession().model })), [used?.model, session?.model])
-  useEffect(() => setChoice((c) => ({ ...c, effort: session?.effort ?? '', ultracode: !!session?.ultracode })), [session?.effort, session?.ultracode])
-  // An effort or Ultracode pick is the session's at once (a model goes with
+  useEffect(() => setChoice((c) => ({ ...c, effort: session?.effort ?? '', ultracode: !!session?.ultracode, chrome: !!session?.chrome })), [session?.effort, session?.ultracode, session?.chrome])
+  // An effort, Ultracode or Chrome pick is the session's at once (a model goes with
   // the next send): kept only here, a tab switch or a reload lost it.
   const pickChoice = (c: Choice) => {
     setChoice(c)
-    if (id && (c.effort !== choice.effort || c.ultracode !== choice.ultracode)) {
-      postJSON(`/api/sessions/${id}/settings`, { effort: c.effort || 'default', ultracode: c.ultracode }).then(refreshLists, () => {})
+    if (id && (c.effort !== choice.effort || c.ultracode !== choice.ultracode || c.chrome !== choice.chrome)) {
+      postJSON(`/api/sessions/${id}/settings`, { effort: c.effort || 'default', ultracode: c.ultracode, chrome: c.chrome }).then(refreshLists, () => {})
     }
   }
   useEffect(() => setMode(used?.mode || session?.permissionMode || ''), [used?.mode, session?.permissionMode])
@@ -141,7 +142,7 @@ export function Composer({ session, folder, onStarted, filesIn }: Props) {
     setProvider(p)
     localStorage.setItem(providerKey, p)
     providerListeners.forEach((l) => l())
-    setChoice({ model: '', effort: '', ultracode: false }) // the other agent's models
+    setChoice({ model: '', effort: '', ultracode: false, chrome: false }) // the other agent's models
     if (p === 'codex' && shownMode === 'acceptEdits') setMode('manual')
   }
 
@@ -236,6 +237,7 @@ export function Composer({ session, folder, onStarted, filesIn }: Props) {
     body.model = choice.model || 'default'
     body.effort = choice.effort || 'default'
     body.ultracode = choice.ultracode
+    body.chrome = choice.chrome
     body.permissionMode = shownMode // what the chip shows is what runs
     if (force) body.force = true
     if (queue) body.queue = true

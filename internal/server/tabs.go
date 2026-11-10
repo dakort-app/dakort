@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 )
@@ -166,6 +167,19 @@ func (s *Server) setTabs(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.IDs == nil {
 		req.IDs = []string{}
+	}
+	// Which device closed what: a page out of date once closed, on every
+	// device, the tabs opened while it slept.
+	if old, ok := s.tabs.get(req.Folder); ok {
+		var gone []string
+		for _, id := range old {
+			if !slices.Contains(req.IDs, id) {
+				gone = append(gone, id)
+			}
+		}
+		if len(gone) > 0 {
+			log.Printf("tabs: %s: %v closed by %s", req.Folder, gone, r.UserAgent())
+		}
 	}
 	if err := s.tabs.set(req.Folder, req.IDs); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

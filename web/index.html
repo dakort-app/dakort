@@ -7,8 +7,17 @@
     <title>Dakort</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <script>
+      // The keys were "made.*" before the project was renamed (2026-11-09):
+      // carry a device's tabs, drafts and theme over once. Remove after a
+      // release or two.
+      for (const k of Object.keys(localStorage)) {
+        if (!k.startsWith('made.')) continue
+        const n = 'dakort.' + k.slice(5)
+        if (localStorage.getItem(n) === null) localStorage.setItem(n, localStorage.getItem(k))
+        localStorage.removeItem(k)
+      }
       // Light or dark before the first paint (see src/theme.ts).
-      document.documentElement.dataset.theme = localStorage.getItem('made.theme') === 'dark' ? 'dark' : 'light'
+      document.documentElement.dataset.theme = localStorage.getItem('dakort.theme') === 'dark' ? 'dark' : 'light'
     </script>
   </head>
   <body>

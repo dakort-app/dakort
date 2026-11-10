@@ -2,9 +2,8 @@ package server
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"mime"
@@ -23,7 +22,7 @@ import (
 // script with the app's cookie. See BRIEF, "Plan for piece 7".
 //
 //	GET /api/files/list?root=R&path=P   the entries of folder P (one level)
-//	GET /api/files/raw?root=R&path=P    the bytes of file P; &download=1 marks it an attachment
+//	GET /api/files/raw?root=R&path=P    the bytes of file P; &download=1 marks it an attachment; &html=1 serves an .html file as a page (sandboxed)
 //	GET /api/files/stat?root=R&path=P   size and mtime; complete for a PDF
 
 const (
@@ -49,6 +48,19 @@ var hiddenNames = map[string]bool{".git": true}
 var servedTypes = map[string]string{
 	".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
 	".gif": "image/gif", ".webp": "image/webp", ".pdf": "application/pdf",
+	".avif": "image/avif", ".bmp": "image/bmp", ".ico": "image/x-icon",
+	// Shown through an img, where an SVG's scripts never run; opened
+	// directly, the sandbox below stops them.
+	".svg": "image/svg+xml",
+}
+
+// Audio and video play in the browser's own player, which asks for byte
+// ranges (Safari plays nothing without them), so they are streamed from
+// the file rather than sent whole from a snapshot.
+var mediaTypes = map[string]string{
+	".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm",
+	".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav",
+	".ogg": "audio/ogg", ".oga": "audio/ogg", ".flac": "audio/flac",
 }
 
 func forbidden(msg string) error { return &httpError{status: 403, msg: msg} }
@@ -222,6 +234,10 @@ func (s *Server) rawFile(w http.ResponseWriter, r *http.Request) {
 		s.reply(w, http.StatusOK)(nil, err)
 		return
 	}
+	if ct, ok := mediaTypes[strings.ToLower(filepath.Ext(p))]; ok {
+		s.streamMedia(w, r, f, p, ct)
+		return
+	}
 	data, _, err := snapshot(f)
 	if err != nil {
 		s.reply(w, http.StatusOK)(nil, err)
@@ -235,8 +251,7 @@ func (s *Server) rawFile(w http.ResponseWriter, r *http.Request) {
 		s.reply(w, http.StatusOK)(nil, &httpError{status: 503, msg: "the PDF is being written"})
 		return
 	}
-	sum := sha256.Sum256(data)
-	etag := `"` + hex.EncodeToString(sum[:16]) + `"`
+	etag := contentTag(data) // also the version a save checks against (save.go)
 	h := w.Header()
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "sandbox")
@@ -250,6 +265,12 @@ func (s *Server) rawFile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		ct = "application/octet-stream"
 	}
+	// An HTML file asked for as a page (a phone's "Open in new tab"): the
+	// sandbox header above runs none of its scripts and gives it no
+	// cookie, so it shows as a plain page. Never in the app's own frame.
+	if htmlExts[ext] && r.URL.Query().Get("html") != "" {
+		ct = "text/html; charset=utf-8"
+	}
 	h.Set("Content-Type", ct)
 	h.Set("Content-Length", strconv.Itoa(len(data)))
 	// The Save button asks for a download: a phone's browser would open a
@@ -260,6 +281,29 @@ func (s *Server) rawFile(w http.ResponseWriter, r *http.Request) {
 	// Written whole, never as ranges: a range request could stitch two
 	// generations of a file being rewritten.
 	w.Write(data)
+}
+
+// streamMedia serves audio or video with ranges (http.ServeContent), the
+// handle held only for the request. A file rewritten mid-play can mix two
+// versions in the player; the ETag of size and time makes the browser
+// start over once it notices.
+func (s *Server) streamMedia(w http.ResponseWriter, r *http.Request, f *os.File, p, ct string) {
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil || fi.IsDir() {
+		s.reply(w, http.StatusOK)(nil, badPath("not a file"))
+		return
+	}
+	h := w.Header()
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "sandbox")
+	h.Set("Cache-Control", "private, no-cache")
+	h.Set("Content-Type", ct)
+	h.Set("ETag", fmt.Sprintf(`"%x-%x"`, fi.Size(), fi.ModTime().UnixNano()))
+	if r.URL.Query().Get("download") != "" {
+		h.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(p)}))
+	}
+	http.ServeContent(w, r, filepath.Base(p), fi.ModTime(), f)
 }
 
 type fileStat struct {

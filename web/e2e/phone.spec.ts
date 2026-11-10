@@ -1,13 +1,20 @@
 import { readFileSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
 
-const token = process.env.MADE_TOKEN ?? ''
-test.skip(!token, 'MADE_TOKEN not set')
+const token = process.env.DAKORT_TOKEN ?? ''
+test.skip(!token, 'DAKORT_TOKEN not set')
 
-type Session = { id: string; folder?: string; size: number; title: string; heldBy?: number; provider?: string }
+type Session = { id: string; folder?: string; cwd?: string; size: number; title: string; heldBy?: number; provider?: string; updated?: string }
+
+// quiet picks the newest Claude session nothing is writing to: not held by
+// a live CLI and no row in the last 10 minutes. The newest session overall
+// is often one in use while the checks run (the one shipping, or another
+// turn in progress), and a check that reads it twice saw it change between.
+const quiet = (l: Session[]) =>
+  l.find((s) => s.provider !== 'codex' && !s.heldBy && Date.now() - Date.parse(s.updated ?? '') > 10 * 60_000) ?? l[0]
 
 // Where the app keeps a folder's tabs (local.ts: a Windows path's case folded).
-const tabsKey = (folder: string) => 'made.tabs:' + (/^[a-z]:[\\/]/i.test(folder) ? folder.toLowerCase() : folder)
+const tabsKey = (folder: string) => 'dakort.tabs:' + (/^[a-z]:[\\/]/i.test(folder) ? folder.toLowerCase() : folder)
 
 // seedTabs sets a folder's tabs as a device would have them: the shared
 // list on the server (the project's) and this page's view in local storage.
@@ -46,6 +53,33 @@ async function openSession(page: Page, pick: (s: Session[]) => Session) {
 const opened: string[] = []
 test.afterEach(async ({ page }) => {
   for (const path of opened.splice(0)) await page.request.post('/api/folders/close', { data: { path } })
+})
+
+// A device from before the rename (2026-11-09) keeps its tabs, drafts and
+// theme: index.html copies the made.* keys to dakort.* before the first
+// paint, and the old cookie is swapped for the new one by the server.
+test('a device from before the rename keeps its settings and stays logged in', async ({ page, context }) => {
+  await page.goto('/login?token=' + token)
+  await page.evaluate(() => {
+    localStorage.clear()
+    localStorage.setItem('made.theme', 'dark')
+    localStorage.setItem('made.draft:new:C:\\madetest\\old', 'half a thought')
+  })
+  // The cookie as the old server set it, instead of the new one.
+  await context.clearCookies()
+  const url = new URL(page.url())
+  await context.addCookies([{ name: 'made_token', value: token, domain: url.hostname, path: '/', httpOnly: true, sameSite: 'Strict' }])
+  await page.goto('/')
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  expect(await page.evaluate(() => localStorage.getItem('dakort.draft:new:C:\\madetest\\old'))).toBe('half a thought')
+  expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('made.')))).toEqual([])
+  const names = (await context.cookies()).map((c) => c.name).sort()
+  expect(names).toEqual(['dakort_token'])
+  expect((await page.request.get('/api/sessions')).status()).toBe(200)
+  await page.evaluate(() => {
+    localStorage.removeItem('dakort.theme')
+    localStorage.removeItem('dakort.draft:new:C:\\madetest\\old')
+  })
 })
 
 // The largest session: many pages above, long tool output, images.
@@ -174,7 +208,7 @@ test('home opens a folder; the folder list opens another', async ({ page }, info
 // the session's transcript says it last ran with (a terminal's "auto" once
 // came up as the global default, "Ask before edits").
 test('the mode chip shows what the session last ran with', async ({ page }) => {
-  const s = await openSession(page, (l) => l[0])
+  const s = await openSession(page, quiet)
   const tail: { rows: { role: string; permissionMode?: string }[] } = await (await page.request.get(`/api/sessions/${s.id}/rows?n=200`)).json()
   const last = tail.rows.filter((r) => r.role === 'user' && r.permissionMode).pop()?.permissionMode
   const chip = page.locator('.mode-chip select')
@@ -207,7 +241,7 @@ test('the mode chip shows what the session last ran with', async ({ page }) => {
 // The "/" menu lists the commands that work here, narrows as you type, and
 // a pick fills the box (never sent here: these are real sessions).
 test('the slash menu', async ({ page }, info) => {
-  await openSession(page, (l) => l[0])
+  await openSession(page, quiet)
   const box = page.locator('.composer textarea')
   await box.fill('/co')
   const rows = page.locator('.slash-menu .slash-name')
@@ -339,6 +373,17 @@ test('a pasted screenshot shows at once and goes as a sharp PNG', async ({ page 
   await box.fill('')
 })
 
+// A reloaded page knows nothing of running turns, so it must ask for the
+// snapshot (no last id): resuming the stream replays only what came after
+// that id, and a turn started before it showed no Stop until it ended.
+test('a reloaded page asks for the snapshot of running turns', async ({ page }) => {
+  await openSession(page, (l) => l[0])
+  await expect(page.locator('.dot.ok').first()).toBeAttached()
+  const asked = page.waitForRequest((r) => r.url().includes('/api/events'))
+  await page.reload()
+  expect(new URL((await asked).url()).searchParams.get('last')).toBe('')
+})
+
 test('images open in a popup', async ({ page }, info) => {
   await openSession(page, (l) => l[0])
   const thumb = page.locator('.transcript .thumb').last()
@@ -456,7 +501,7 @@ test('a missing CLI is named with its install command', async ({ page }) => {
     delete cfg.codex
     await route.fulfill({ response: res, json: cfg })
   })
-  await page.addInitScript(() => localStorage.setItem('made.provider', 'claude'))
+  await page.addInitScript(() => localStorage.setItem('dakort.provider', 'claude'))
   // A small Claude session with rows to show (the smallest are empty).
   await openSession(page, (l) => l.filter((s) => s.provider !== 'codex' && !s.heldBy && s.size > 100_000).sort((a, b) => a.size - b.size)[0])
   const note = page.locator('.composer .missing-cli')
@@ -465,18 +510,25 @@ test('a missing CLI is named with its install command', async ({ page }) => {
   await expect(note.locator('code').nth(1)).toHaveText('claude')
 })
 
-// An effort picked is the session's at once (the test server's settings
-// file, not the live one's): a reload still shows it.
-test('an effort pick survives a reload', async ({ page }) => {
+// An effort or Chrome picked is the session's at once (the test server's
+// settings file, not the live one's): a reload still shows it.
+test('an effort and Chrome pick survive a reload', async ({ page }) => {
   await openSession(page, (l) => l.filter((x) => x.provider !== 'codex' && !x.heldBy && x.size > 50_000).sort((a, b) => a.size - b.size)[0])
   const low = page.locator('.picker-panel [aria-label="Effort Low"]')
+  const chrome = page.locator('.picker-panel [role=switch][aria-label=Chrome]')
   await page.locator('.composer .chip-btn').click()
   await low.click()
   await expect(low).toHaveClass(/\bon\b/)
+  await chrome.click()
+  await expect(chrome).toHaveAttribute('aria-checked', 'true')
   await page.waitForTimeout(500) // the post
   await page.reload()
+  await expect(page.locator('.composer .chip-btn .chip-chrome')).toBeVisible()
   await page.locator('.composer .chip-btn').click()
   await expect(low).toHaveClass(/\bon\b/)
+  await expect(chrome).toHaveAttribute('aria-checked', 'true')
+  await chrome.click()
+  await expect(chrome).toHaveAttribute('aria-checked', 'false')
   await page.locator('.picker-panel [aria-label="Effort Default"]').click()
   await expect(page.locator('.picker-panel [aria-label="Effort Default"]')).toHaveClass(/\bon\b/)
 })
@@ -485,7 +537,7 @@ test('an effort pick survives a reload', async ({ page }) => {
 // and a Codex chip in the composer with GPT models in the picker; no
 // prompt-cache clock (Claude's), no slash menu.
 test('a Codex session shows its rows and its own picker', async ({ page }, info) => {
-  const sessions: Session[] = await (await page.request.get('/api/sessions', { headers: { Cookie: 'made_token=' + token } })).json()
+  const sessions: Session[] = await (await page.request.get('/api/sessions', { headers: { Cookie: 'dakort_token=' + token } })).json()
   test.skip(!sessions.some((s) => s.provider === 'codex' && s.folder), 'no Codex session on this machine')
   const s = await openSession(page, (l) => l.filter((x) => x.provider === 'codex').sort((a, b) => b.size - a.size)[0])
   console.log(`codex session: ${s.title} (${(s.size / 1e6).toFixed(1)} MB)`)
@@ -495,6 +547,7 @@ test('a Codex session shows its rows and its own picker', async ({ page }, info)
   await page.locator('.composer .chip-btn').click()
   await expect(page.locator('.picker-panel .picker-row', { hasText: /GPT/ }).first()).toBeVisible()
   await expect(page.locator('.picker-panel', { hasText: 'Ultracode' })).toHaveCount(0)
+  await expect(page.locator('.picker-panel [aria-label=Chrome]')).toHaveCount(0)
   await page.screenshot({ path: `test-results/codex-${info.project.name}.png` })
   await page.keyboard.press('Escape')
   await page.locator('.composer textarea').fill('/')
@@ -506,7 +559,7 @@ test('a Codex session shows its rows and its own picker', async ({ page }, info)
 // device. Folders come first either way.
 test('the explorer sorts by date or by name', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'the explorer is a drawer on a phone')
-  await page.addInitScript(() => localStorage.removeItem('made.filesSort'))
+  await page.addInitScript(() => localStorage.removeItem('dakort.filesSort'))
   await openSession(page, (l) => l[0])
   const panel = page.locator('.explorer-panel')
   await panel.locator('.tree-row').first().waitFor()
@@ -516,10 +569,265 @@ test('the explorer sorts by date or by name', async ({ page }, info) => {
   const named = await files()
   const lower = (s: string) => s.toLowerCase()
   expect(named).toEqual([...named].sort((a, b) => (lower(a) < lower(b) ? -1 : lower(a) > lower(b) ? 1 : 0))) // the server's order
-  expect(await page.evaluate(() => localStorage.getItem('made.filesSort'))).toBe('name')
+  expect(await page.evaluate(() => localStorage.getItem('dakort.filesSort'))).toBe('name')
   await page.screenshot({ path: 'test-results/explorer-sort.png' })
   await panel.locator('.files-sort').getByRole('button', { name: 'Recent' }).click()
   await expect(panel.locator('.files-sort .chip-btn.on')).toHaveText('Recent')
+})
+
+// A CSV opens as a table: the header stays at the top while the rows
+// scroll, quoted fields keep their commas, only the rows in view are
+// drawn, and Source shows the text. Served by the test, as the Word file.
+test('a CSV file shows as a table', async ({ page }, info) => {
+  const s = await openSession(page, (l) => l[0])
+  const name = 'madetest-sample.csv'
+  const lines = ['id,name,amount']
+  for (let i = 1; i <= 5000; i++) lines.push(`${i},"Smith, row ${i}",${(i * 1.5).toFixed(2)}`)
+  const body = lines.join('\r\n') + '\r\n'
+  await page.route(/\/api\/files\/(stat|raw)\?/, (route) => {
+    const u = new URL(route.request().url())
+    if (u.searchParams.get('path') !== name) return route.fallback()
+    if (u.pathname.endsWith('/stat')) return route.fulfill({ json: { size: body.length, mtime: '2026-11-07T00:00:00Z' } })
+    return route.fulfill({ body, contentType: 'text/csv' })
+  })
+  const tab = 'f:' + name
+  await seedTabs(page, s.folder!, { ids: [s.id, tab], active: tab })
+  await page.reload()
+  const table = page.locator('.csv-table')
+  await expect(table.locator('thead th')).toHaveText(['', 'id', 'name', 'amount'])
+  await expect(table.locator('tbody tr').nth(0)).toContainText('Smith, row 1')
+  await expect(page.locator('.csv-foot')).toHaveText(/5,000 rows × 3 columns/)
+  expect(await table.locator('tbody tr').count()).toBeLessThan(200)
+  await expect(table.locator('tbody tr').first().locator('td.num')).toHaveText(['1', '1.50']) // id and amount, not name
+
+  // Far down: those rows drawn, the header still at the top of the box.
+  const box = page.locator('.csv-box')
+  await box.evaluate((b) => (b.scrollTop = 26 * 3000))
+  await expect(table.locator('tbody td', { hasText: 'Smith, row 3005' })).toBeVisible()
+  const top = (await box.boundingBox())!.y
+  expect(Math.abs((await table.locator('thead th').nth(1).boundingBox())!.y - top)).toBeLessThan(2)
+  await page.screenshot({ path: `test-results/csv-${info.project.name}.png` })
+
+  await page.locator('.file-head').getByRole('button', { name: 'Source' }).click()
+  await expect(page.locator('.cm-content')).toContainText('id,name,amount')
+  await page.locator('.file-head').getByRole('button', { name: 'Table' }).click()
+  await expect(table).toBeVisible()
+})
+
+// Editing a text file: Edit, type, Ctrl+S sends the text with the version
+// it was edited from; a change on disk is taken in while nothing is typed,
+// and with typing pending a refused save offers Reload and Overwrite. Not
+// UTF-8: no Edit. Served by the test, so nothing is written.
+test('a text file can be edited and saved', async ({ page }) => {
+  const s = await openSession(page, (l) => l[0])
+  const name = 'madetest-notes.md'
+  let disk = { body: '# Notes\n\nfirst line\n', tag: '"v1"', mtime: '2026-11-09T00:00:00Z' }
+  const saves: { text: string; base: string }[] = []
+  let refuse = false
+  await page.route(/\/api\/files\/(stat|raw|save)\?/, (route) => {
+    const u = new URL(route.request().url())
+    const p = u.searchParams.get('path')
+    if (p === 'madetest-latin.txt') {
+      if (u.pathname.endsWith('/stat')) return route.fulfill({ json: { size: 5, mtime: disk.mtime } })
+      return route.fulfill({ body: Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a]), contentType: 'application/octet-stream', headers: { ETag: '"l"' } })
+    }
+    if (p !== name) return route.fallback()
+    if (u.pathname.endsWith('/stat')) return route.fulfill({ json: { size: disk.body.length, mtime: disk.mtime } })
+    if (u.pathname.endsWith('/raw')) return route.fulfill({ body: disk.body, contentType: 'application/octet-stream', headers: { ETag: disk.tag } })
+    const req = route.request().postDataJSON() as { text: string; base: string }
+    saves.push(req)
+    if (refuse && req.base !== '*') return route.fulfill({ status: 412, json: { error: 'the file changed since you opened it' } })
+    disk = { body: req.text, tag: `"v${saves.length + 1}"`, mtime: `2026-11-09T00:00:0${saves.length}Z` }
+    return route.fulfill({ json: { etag: disk.tag } })
+  })
+  const tab = 'f:' + name
+  await seedTabs(page, s.folder!, { ids: [s.id, tab], active: tab })
+  await page.reload()
+  const head = page.locator('.file-head')
+  await expect(page.locator('.file-md')).toContainText('first line')
+  await head.getByRole('button', { name: 'Edit' }).click()
+  const content = page.locator('.cm-content')
+  await expect(content).toContainText('first line')
+  await expect(head.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+  await content.click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.type('added\n')
+  await expect(head).toContainText('•')
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect.poll(() => saves.length).toBe(1)
+  expect(saves[0]).toEqual({ text: '# Notes\n\nfirst line\nadded\n', base: '"v1"' })
+  await expect(head).not.toContainText('•')
+
+  // Changed on disk with nothing typed: taken in.
+  disk = { body: '# Notes\n\nfrom the agent\n', tag: '"agent1"', mtime: '2026-11-09T00:01:00Z' }
+  await expect(content).toContainText('from the agent', { timeout: 10_000 })
+  await expect(page.locator('.edit-conflict')).toHaveCount(0)
+
+  // Typing pending and a refused save: Reload and Overwrite.
+  await content.click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.type('mine\n')
+  refuse = true
+  await page.keyboard.press('ControlOrMeta+s')
+  const conflict = page.locator('.edit-conflict')
+  await expect(conflict).toBeVisible()
+  await expect(content).toContainText('mine') // the typing is kept
+  await conflict.getByRole('button', { name: 'Overwrite' }).click()
+  await expect(conflict).toHaveCount(0)
+  expect(saves.at(-1)).toEqual({ text: '# Notes\n\nfrom the agent\nmine\n', base: '*' })
+
+  // Done with unsaved typing asks first.
+  await content.click()
+  await page.keyboard.type('x')
+  page.once('dialog', (d) => d.dismiss())
+  await head.getByRole('button', { name: 'Done' }).click()
+  await expect(head.getByRole('button', { name: 'Done' })).toBeVisible()
+  page.once('dialog', (d) => d.accept())
+  await head.getByRole('button', { name: 'Done' }).click()
+  await expect(head.getByRole('button', { name: 'Edit' })).toBeVisible()
+
+  // Not UTF-8: shown, but no Edit.
+  const latin = 'f:madetest-latin.txt'
+  await seedTabs(page, s.folder!, { ids: [s.id, latin], active: latin })
+  await page.reload()
+  await expect(page.locator('.cm-content')).toContainText('caf')
+  await expect(head.getByRole('link', { name: 'Save' })).toBeVisible() // the download one
+  await expect(head.getByRole('button', { name: 'Edit' })).toHaveCount(0)
+})
+
+// An SVG shows as a picture with its source a tap away; video and audio
+// get the browser's players. Served by the test.
+test('SVG, video and audio files show', async ({ page }) => {
+  const s = await openSession(page, (l) => l[0])
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="120" height="80" fill="#3b6ea8"/></svg>'
+  await page.route(/\/api\/files\/(stat|raw)\?/, (route) => {
+    const u = new URL(route.request().url())
+    const p = u.searchParams.get('path') ?? ''
+    if (!p.startsWith('madetest-')) return route.fallback()
+    if (u.pathname.endsWith('/stat')) return route.fulfill({ json: { size: svg.length, mtime: '2026-11-07T00:00:00Z' } })
+    return route.fulfill({ body: p.endsWith('.svg') ? svg : '', contentType: p.endsWith('.svg') ? 'image/svg+xml' : 'application/octet-stream' })
+  })
+  const tabs = ['f:madetest-pic.svg', 'f:madetest-clip.mp4', 'f:madetest-song.mp3']
+  await seedTabs(page, s.folder!, { ids: [s.id, ...tabs], active: tabs[0] })
+  await page.reload()
+  const img = page.locator('.file-image img')
+  await expect(img).toBeVisible()
+  await expect.poll(() => img.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBe(120)
+  await page.locator('.file-head').getByRole('button', { name: 'Source' }).click()
+  await expect(page.locator('.cm-content')).toContainText('<rect')
+  await page.locator('.file-head').getByRole('button', { name: 'Picture' }).click()
+  await expect(img).toBeVisible()
+
+  // On a phone only the active tab shows, so each file is made active.
+  await seedTabs(page, s.folder!, { ids: [s.id, ...tabs], active: tabs[1] })
+  await page.reload()
+  await expect(page.locator('.file-image video[controls]')).toHaveCount(1)
+  await seedTabs(page, s.folder!, { ids: [s.id, ...tabs], active: tabs[2] })
+  await page.reload()
+  await expect(page.locator('.file-image audio[controls]')).toHaveCount(1)
+})
+
+// An HTML file shows as source, never rendered in the app. On the computer
+// itself a button has the computer's browser open it; elsewhere a link
+// opens it as a sandboxed page. The test answers /api/here and the open
+// call, so no window appears.
+test('an HTML file opens outside the app', async ({ page }) => {
+  const s = await openSession(page, (l) => l[0])
+  const html = '<h1>Report</h1><script>document.title="ran"</script>'
+  let local = false
+  const opened: string[] = []
+  await page.route('**/api/here', (route) => route.fulfill({ json: { local } }))
+  await page.route(/\/api\/files\/(stat|raw|open)\?/, (route) => {
+    const u = new URL(route.request().url())
+    if (u.searchParams.get('path') !== 'madetest-report.html') return route.fallback()
+    if (u.pathname.endsWith('/open')) {
+      opened.push(u.searchParams.get('path')!)
+      return route.fulfill({ json: { ok: true } })
+    }
+    if (u.pathname.endsWith('/stat')) return route.fulfill({ json: { size: html.length, mtime: '2026-11-07T00:00:00Z' } })
+    return route.fulfill({ body: html, contentType: 'application/octet-stream' })
+  })
+  const tab = 'f:madetest-report.html'
+  await seedTabs(page, s.folder!, { ids: [s.id, tab], active: tab })
+  await page.reload()
+  await expect(page.locator('.cm-content')).toContainText('<h1>Report</h1>')
+  const link = page.locator('.file-head a', { hasText: 'Open in new tab' })
+  await expect(link).toHaveAttribute('href', /html=1/)
+  await expect(link).toHaveAttribute('target', '_blank')
+
+  local = true
+  await page.reload()
+  await page.locator('.file-head').getByRole('button', { name: 'Open in browser' }).click()
+  await expect.poll(() => opened).toEqual(['madetest-report.html'])
+  await expect(page.locator('.file-head a', { hasText: 'Open in new tab' })).toHaveCount(0)
+})
+
+// A spreadsheet is not shown: a note says what to do, and on the computer
+// a button opens it in its program. Nothing of the file is fetched.
+test('a spreadsheet says how to open it', async ({ page }) => {
+  const s = await openSession(page, (l) => l[0])
+  let local = false
+  const opened: string[] = []
+  let fetched = 0
+  await page.route('**/api/here', (route) => route.fulfill({ json: { local } }))
+  await page.route(/\/api\/files\/(stat|raw|open)\?/, (route) => {
+    const u = new URL(route.request().url())
+    if (u.searchParams.get('path') !== 'madetest-budget.xlsx') return route.fallback()
+    if (u.pathname.endsWith('/open')) {
+      opened.push('xlsx')
+      return route.fulfill({ json: { ok: true } })
+    }
+    if (u.pathname.endsWith('/raw')) fetched++
+    return route.fulfill({ json: { size: 4096, mtime: '2026-11-07T00:00:00Z' } })
+  })
+  const tab = 'f:madetest-budget.xlsx'
+  await seedTabs(page, s.folder!, { ids: [s.id, tab], active: tab })
+  await page.reload()
+  const note = page.locator('.office-note')
+  await expect(note).toContainText('does not show .xlsx files')
+  await expect(note).toContainText('export a sheet as CSV')
+  await expect(page.locator('.file-head').getByRole('button', { name: 'Open on the computer' })).toHaveCount(0)
+
+  local = true
+  await page.reload()
+  await page.locator('.file-head').getByRole('button', { name: 'Open on the computer' }).click()
+  await expect.poll(() => opened).toEqual(['xlsx'])
+  expect(fetched).toBe(0)
+})
+
+// An archive lists what is inside as a tree: a lone top folder starts
+// open, folders a zip names only through their files appear, folders
+// fold, and the count and unpacked size show below. The test answers the
+// listing (the server's own is tested in Go).
+test('an archive lists its contents', async ({ page }) => {
+  const s = await openSession(page, (l) => l[0])
+  const entries = [
+    { name: 'proj/', size: 0, dir: true },
+    { name: 'proj/README.md', size: 2048, mtime: '2026-11-01T10:00:00Z' },
+    { name: 'proj/src/main.go', size: 1536, mtime: '2026-11-01T10:00:00Z' },
+    { name: 'proj/src/util.go', size: 512 },
+  ]
+  await page.route(/\/api\/files\/(stat|archive)\?/, (route) => {
+    const u = new URL(route.request().url())
+    if (u.searchParams.get('path') !== 'madetest-bundle.zip') return route.fallback()
+    if (u.pathname.endsWith('/stat')) return route.fulfill({ json: { size: 999, mtime: '2026-11-07T00:00:00Z' } })
+    return route.fulfill({ json: { entries } })
+  })
+  const tab = 'f:madetest-bundle.zip'
+  await seedTabs(page, s.folder!, { ids: [s.id, tab], active: tab })
+  await page.reload()
+  const rows = page.locator('.archive-row')
+  await expect(rows).toHaveCount(3) // proj open: src (folded) and README.md
+  await expect(rows.nth(0)).toContainText('proj')
+  await expect(rows.nth(1)).toContainText('src')
+  await expect(rows.nth(2)).toContainText('README.md')
+  await expect(rows.nth(2)).toContainText('2.0 KB')
+  await expect(page.locator('.csv-foot')).toHaveText('3 files, 4.0 KB unpacked')
+  await rows.nth(1).click()
+  await expect(rows).toHaveCount(5)
+  await expect(rows.nth(2)).toContainText('main.go')
+  await rows.nth(0).click()
+  await expect(rows).toHaveCount(1)
 })
 
 // A Word file opens as pages, shrunk to the width on a phone. The file is
@@ -643,7 +951,16 @@ test('a PDF fits the page and finds words', async ({ page }, info) => {
   await page.locator('.tabs .tab').nth(1).click()
   await expect(pages.nth(1)).toBeInViewport()
   await expect(page.locator('.pdf-bar > span').first()).toHaveText('2 / 3')
-  await page.evaluate(() => ((document.querySelector('.pdf-pages') as HTMLElement).scrollTop = 0))
+  // To the top, until it stays there: under the full run's load the new
+  // version could land after a single scroll and put the reader back on
+  // page 2 (as it should), and find then started from there.
+  await expect
+    .poll(async () => {
+      await page.evaluate(() => ((document.querySelector('.pdf-pages') as HTMLElement).scrollTop = 0))
+      await page.waitForTimeout(400)
+      return page.evaluate(() => (document.querySelector('.pdf-pages') as HTMLElement).scrollTop)
+    })
+    .toBe(0)
 
   // Find: Ctrl+F in the view opens it; Enter goes through the matches.
   await pages.first().click()
@@ -753,6 +1070,21 @@ async function serveNotes(page: Page, name: string) {
 // drags (clamped to a quarter and three quarters), the split survives a
 // reload, a tab's menu moves it back, and closing the split brings its
 // tabs home.
+test('the tab menu copies the command that resumes the session in a terminal', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'the tab menu is for a laptop')
+  // What the page puts on the clipboard, without the browser's permission.
+  await page.addInitScript(() => {
+    const w = window as unknown as { copied: string }
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (t: string) => void (w.copied = t) } })
+  })
+  const s = await openSession(page, quiet)
+  await page.locator(`.tab[data-tab="${s.id}"]`).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Copy resume command' }).click()
+  await expect(page.locator('.toast')).toContainText('Copied')
+  const text = await page.evaluate(() => (window as unknown as { copied: string }).copied)
+  expect(text).toBe(`cd '${s.cwd}'; ${s.provider === 'codex' ? 'codex resume' : 'claude --resume'} ${s.id}`)
+})
+
 test('split view puts a file beside a session', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'split view is for a laptop')
   const s = await openSession(page, (l) => l.filter((x) => x.size > 100_000)[0] ?? l[0])
@@ -840,14 +1172,17 @@ test('two sessions side by side keep to themselves', async ({ page }, info) => {
   if (info.project.name !== 'desktop') {
     await expect(panes).toHaveCount(1)
     await expect(page.locator('.pane-splitter')).toHaveCount(0)
-    await expect(page.locator('.tabs .tab')).toHaveCount(2)
+    // Both, in the one pane; a session of the folder that is busy while the
+    // checks run (the one shipping) may come in as a tab of its own.
+    await expect(page.locator(`.tabs .tab[data-tab="${a}"]`)).toHaveCount(1)
+    await expect(page.locator(`.tabs .tab[data-tab="${b}"]`)).toHaveCount(1)
     return
   }
   await expect(panes).toHaveCount(2)
   await panes.nth(0).locator('.composer textarea').waitFor()
   await panes.nth(1).locator('.composer textarea').waitFor()
 
-  const play = (ev: object) => page.evaluate((ev) => (window as any).made.stream.onEvent(ev), ev)
+  const play = (ev: object) => page.evaluate((ev) => (window as any).dakort.stream.onEvent(ev), ev)
   await play({ type: 'turn', session: a, state: 'running' })
   await play({ type: 'delta', session: a, index: 0, kind: 'text', text: 'madetest streaming into A' })
   await expect(panes.nth(0)).toContainText('madetest streaming into A')
@@ -947,7 +1282,7 @@ test('a project is renamed from its row', async ({ page }, info) => {
 // stop faked, so nothing real is ended.
 test('a process a turn left running shows with a Stop', async ({ page }, info) => {
   const s = await openSession(page, (l) => l.filter((x) => x.provider !== 'codex' && !x.heldBy)[0] ?? l[0])
-  const play = (ev: object) => page.evaluate((ev) => (window as any).made.stream.onEvent(ev), ev)
+  const play = (ev: object) => page.evaluate((ev) => (window as any).dakort.stream.onEvent(ev), ev)
   let stops = 0
   await page.route(`**/api/sessions/${s.id}/leftovers/4242/stop`, (route) => {
     stops++
@@ -972,7 +1307,7 @@ test('a process a turn left running shows with a Stop', async ({ page }, info) =
 // so nothing reaches a CLI.
 test('a message sent during a turn is queued, and comes back on a stop', async ({ page }, info) => {
   const s = await openSession(page, (l) => l.filter((x) => x.provider !== 'codex' && !x.heldBy)[0] ?? l[0])
-  const play = (ev: object) => page.evaluate((ev) => (window as any).made.stream.onEvent(ev), ev)
+  const play = (ev: object) => page.evaluate((ev) => (window as any).dakort.stream.onEvent(ev), ev)
   const bodies: Record<string, unknown>[] = []
   await page.route('**/api/sessions/*/send', (route) => {
     const b = route.request().postDataJSON()
@@ -1186,23 +1521,107 @@ test("tabs are the project's, the same in every browser", async ({ page, browser
   await other.close()
 })
 
-// The count in the page title is the folder's own: a session finishing in
-// another folder leaves this tab's title alone, one in this folder (not on
-// screen) counts, and looking at it clears the count. Every tab once
-// counted every finish, so three tabs on three projects all said (1).
-test('the title counts finished work in its own folder only', async ({ page }) => {
+// A table with one column of sentences, at phone width: the short columns
+// stay on one line and the long one keeps a readable width, the table
+// scrolling sideways instead. They were cut down to a word a line. The
+// classes are mdrender.ts's (its unit test checks them); this checks what
+// the CSS makes of them.
+test('a table keeps its short columns whole on a phone', async ({ page }, info) => {
+  test.skip(info.project.name !== 'iphone-webkit', 'the squeeze is worst on a phone')
+  await page.goto('/login?token=' + token)
+  const long = 'No good in-browser viewer exists. If LibreOffice is installed, the server can convert the file to PDF and show it in the PDF viewer.'
+  const lines = await page.evaluate((long) => {
+    const box = document.createElement('div')
+    box.className = 'md'
+    box.style.cssText = 'position:fixed;inset:0 16px auto;background:white;z-index:99'
+    box.innerHTML =
+      '<table><thead><tr><th class="short">Format</th><th class="long">Approach</th><th class="short">Effort</th></tr></thead>' +
+      `<tbody><tr><td class="short">ODT, ODS, ODP, PowerPoint</td><td class="long">${long}</td><td class="short">Moderate, needs LibreOffice</td></tr></tbody></table>`
+    document.body.append(box)
+    const tops = (el: Element) => {
+      const r = document.createRange()
+      r.selectNodeContents(el)
+      return new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size
+    }
+    const [format, approach, effort] = [...box.querySelectorAll('td')]
+    return { format: tops(format), effort: tops(effort), approach: approach.getBoundingClientRect().width / parseFloat(getComputedStyle(approach).fontSize) }
+  }, long)
+  expect(lines.format).toBe(1)
+  expect(lines.effort).toBe(1)
+  expect(lines.approach).toBeGreaterThanOrEqual(14)
+})
+
+// A page out of touch (a phone asleep) has a list that may be behind, and
+// must not send it up: one that did closed, on every device, the tabs
+// another device opened meanwhile. A tab it closes then comes back; one
+// opened elsewhere stays.
+test('a page out of touch cannot close the tabs opened elsewhere', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'one size is enough')
+  const s = await openSession(page, (l) => l[0])
+  const all: Session[] = await (await page.request.get('/api/sessions')).json()
+  const three = all.filter((x) => x.folder === s.folder).slice(0, 3).map((x) => x.id)
+  test.skip(three.length < 3, 'needs three sessions in one folder')
+  await seedTabs(page, s.folder!, { ids: three.slice(0, 2), active: three[0] })
+  await page.reload()
+  const tabs = page.locator('.tabs .tab')
+  await expect(tabs).toHaveCount(2)
+
+  // Out of touch: the stream is cut and cannot come back.
+  await page.route('**/api/events*', (r) => r.abort())
+  await page.evaluate(() => (window as any).dakort.stream.open())
+  // Meanwhile another device opens a third tab, and this page closes one.
+  await page.request.post('/api/tabs', { data: { folder: s.folder, ids: three } })
+  await tabs.nth(1).hover()
+  await tabs.nth(1).getByLabel('Close tab').click()
+  await expect(tabs).toHaveCount(1)
+  await page.waitForTimeout(500)
+  const { ids } = await (await page.request.get('/api/tabs?folder=' + encodeURIComponent(s.folder!))).json()
+  expect(ids).toEqual(three)
+
+  // Back in touch: the project's list, all three.
+  await page.unroute('**/api/events*')
+  await expect(tabs).toHaveCount(3, { timeout: 15_000 })
+})
+
+// The tab's icon marks finished work in the folder's own sessions only: a
+// session finishing in another folder leaves this tab's icon alone, one in
+// this folder (not on screen) marks it. Every tab once marked every
+// finish, so three tabs on three projects all said so. The title is the
+// folder's name alone.
+test('the tab icon marks finished work in its own folder only', async ({ page }) => {
   const s = await openSession(page, (l) => l[0])
   const all: Session[] = await (await page.request.get('/api/sessions')).json()
   const elsewhere = all.find((x) => x.folder && x.folder !== s.folder)
   const here = all.find((x) => x.folder === s.folder && x.id !== s.id)
   test.skip(!elsewhere || !here, 'needs a session in another folder and a second one in this')
-  const play = (ev: object) => page.evaluate((ev) => (window as any).made.stream.onEvent(ev), ev)
-  await expect(page).toHaveTitle(/^[^(]/)
+  const play = (ev: object) => page.evaluate((ev) => (window as any).dakort.stream.onEvent(ev), ev)
+  const icon = page.locator('link[rel="icon"]')
+  await expect(page).toHaveTitle(/^[^(·]+$/)
+  await expect(icon).not.toHaveAttribute('data-state', 'done')
   await play({ type: 'turn', session: elsewhere!.id, state: 'done', result: { ok: true } })
   await page.waitForTimeout(300)
-  await expect(page).toHaveTitle(/^[^(]/)
+  await expect(icon).not.toHaveAttribute('data-state', 'done')
   await play({ type: 'turn', session: here!.id, state: 'done', result: { ok: true } })
-  await expect(page).toHaveTitle(/^\(1\) /)
+  await expect(icon).toHaveAttribute('data-state', 'done')
+  await expect(page).toHaveTitle(/^[^(·]+$/)
+})
+
+// Background tasks that outlive their turn (agents, commands) show as
+// work: a ring on the session's tab, not the turn's pulse, and the page
+// icon's working look, where both once read as idle while agents ran.
+test('background tasks after a turn still show as work', async ({ page }) => {
+  const s = await openSession(page, (l) => l[0])
+  const play = (ev: object) => page.evaluate((ev) => (window as any).dakort.stream.onEvent(ev), ev)
+  const icon = page.locator('link[rel="icon"]')
+  const tab = page.locator(`.tabs .tab[data-tab="${s.id}"]`)
+  await expect(tab.locator('.dot.tasks')).toHaveCount(0)
+  await play({ type: 'tasks', session: s.id, tasks: [{ id: 'k1', type: 'local_agent', description: 'Research' }] })
+  await expect(tab.locator('.dot.tasks')).toHaveCount(1)
+  await expect(tab.locator('.dot.run')).toHaveCount(0)
+  await expect(icon).toHaveAttribute('data-state', 'run')
+  await play({ type: 'tasks', session: s.id, tasks: [] })
+  await expect(tab.locator('.dot.tasks')).toHaveCount(0)
+  await expect(icon).toHaveAttribute('data-state', 'idle')
 })
 
 // A newer release shows under the folder list once the server says so (a
@@ -1211,7 +1630,7 @@ test('the title counts finished work in its own folder only', async ({ page }) =
 test('a newer release is announced under the folder list', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'the explorer is a drawer on a phone')
   await openSession(page, (l) => l[0])
-  const play = (ev: object) => page.evaluate((ev) => (window as any).made.stream.onEvent(ev), ev)
+  const play = (ev: object) => page.evaluate((ev) => (window as any).dakort.stream.onEvent(ev), ev)
   await expect(page.locator('.notice.release')).toHaveCount(0)
   await play({ type: 'release', latest: 'v9.9.9' })
   const notice = page.locator('.notice.release')

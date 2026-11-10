@@ -10,7 +10,8 @@
 //     the first row's, since sessions change directory as they go.
 //   - Updated is the last user or assistant row's time, from the tail. The
 //     file's mtime is not used for this: the CLI appends bookkeeping lines
-//     long after the last row.
+//     long after the last row. A compaction's rows do not count, so an idle
+//     compaction at night neither marks a session unread nor moves it up.
 //   - Held marks a session a live CLI process has open, from the registry
 //     in ~/.claude/sessions, which keeps stale files for dead processes.
 package index

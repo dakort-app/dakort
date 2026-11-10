@@ -64,7 +64,7 @@ func fetch(t *testing.T, url, cookie string) (*http.Response, []byte) {
 	t.Helper()
 	req, _ := http.NewRequest("GET", url, nil)
 	if cookie != "" {
-		req.AddCookie(&http.Cookie{Name: "made_token", Value: cookie})
+		req.AddCookie(&http.Cookie{Name: "dakort_token", Value: cookie})
 	}
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := client.Do(req)
@@ -126,8 +126,36 @@ func TestAuth(t *testing.T) {
 		t.Fatalf("login: %d to %q", resp.StatusCode, resp.Header.Get("Location"))
 	}
 	cs := resp.Cookies()
-	if len(cs) != 1 || cs[0].Value != token || !cs[0].HttpOnly || cs[0].SameSite != http.SameSiteStrictMode {
+	if len(cs) != 1 || cs[0].Name != "dakort_token" || cs[0].Value != token || !cs[0].HttpOnly || cs[0].SameSite != http.SameSiteStrictMode {
 		t.Errorf("login cookie: %+v", cs)
+	}
+
+	// A device with the cookie from before the rename is let in and given
+	// the new one, the old one expired, in the same response.
+	req, _ := http.NewRequest("GET", f.srv.URL+"/api/sessions", nil)
+	req.AddCookie(&http.Cookie{Name: "made_token", Value: token})
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("old cookie: %d", resp.StatusCode)
+	}
+	got := map[string]*http.Cookie{}
+	for _, c := range resp.Cookies() {
+		got[c.Name] = c
+	}
+	if c := got["dakort_token"]; c == nil || c.Value != token || !c.HttpOnly {
+		t.Errorf("old cookie: new one not set: %+v", resp.Cookies())
+	}
+	if c := got["made_token"]; c == nil || c.MaxAge >= 0 {
+		t.Errorf("old cookie: not expired: %+v", resp.Cookies())
+	}
+	req, _ = http.NewRequest("GET", f.srv.URL+"/api/sessions", nil)
+	req.AddCookie(&http.Cookie{Name: "made_token", Value: "wrong"})
+	if resp, err = http.DefaultClient.Do(req); err != nil || resp.StatusCode != 401 {
+		t.Errorf("wrong old cookie: %v %d", err, resp.StatusCode)
 	}
 }
 
@@ -162,7 +190,7 @@ func TestEmbeddedUI(t *testing.T) {
 		resp, _ := fetch(t, f.srv.URL+name, token)
 		tag := resp.Header.Get("ETag")
 		req, _ := http.NewRequest("GET", f.srv.URL+name, nil)
-		req.AddCookie(&http.Cookie{Name: "made_token", Value: token})
+		req.AddCookie(&http.Cookie{Name: "dakort_token", Value: token})
 		req.Header.Set("If-None-Match", tag)
 		r2, err := http.DefaultClient.Do(req)
 		if tag == "" || err != nil || r2.StatusCode != 304 {

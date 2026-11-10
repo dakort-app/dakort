@@ -1,58 +1,183 @@
 # Dakort
 
-Claude Code and Codex on your phone, from anywhere, with your real sessions.
+All your Claude Code and Codex projects in one light window, with the
+files beside the agent.
 
-Dakort is a small server you run on your own computer. It shows the
-sessions you already have in the terminal, lets you read what the agent
-did while you were away, send the next message, allow or refuse what it
-asks permission for, open the files it wrote (PDFs, Word documents, code),
-and keep several projects going at once. Your phone reaches it over your
-own Tailscale network; nothing is exposed to the internet.
+![Two projects; a prompt; Claude adds a query parameter and a test while main.go updates beside the conversation; the same session on a phone](docs/dakort.gif)
 
-The name is Albanian for "agreed", from the French d'accord. Half of what
-you do in it is tap Allow.
+Dakort is a small server on your own computer and a page in your browser.
+Each project is a browser tab.
+
+Inside Dakort, a project's Claude Code and Codex sessions are tabs, and
+the files the agent is working on can also open beside the conversation.
+
+When an agent finishes, the browser tab's icon changes, so you can see
+from the tab strip which project wants you. The same page opens on your
+phone over Tailscale.
+
+A session started in a terminal appears in Dakort, and one started in
+Dakort can be resumed in the terminal.
+
+## Why
+
+Try four projects at once, each with three or four Claude Code sessions,
+without Dakort. In the terminal that is a dozen windows, and nothing
+tells you which one just finished. In VS Code it is four heavy windows
+with the agent in a side panel.
+
+Claude Desktop is session-centric. Its sidebar is one list of a dozen
+sessions, each with a folder attached, and it lists only the sessions it
+started itself. Codex's apps have a shape of their own, so someone on
+both agents learns two of everything. And a LaTeX or Word project gets
+no view of its files anywhere.
+
+Dakort is project-centric, which is how Claude Code and Codex store your
+work anyway. A project is a browser tab. Inside it, its sessions are
+tabs, from either agent, started here or in a terminal, with its files
+beside them. The browser tab's icon says when one of its agents is done,
+so the tab strip alone tells you which project wants you. One page for
+both agents, one Go binary with the page inside, no Electron, nothing
+else to install. The CLIs run only while a turn runs.
+
+## What you get
+
+- **Projects as browser tabs.** Each with its own session tabs and files.
+  A project whose agent is working, or finished since you looked, shows
+  it in its row, its session tab and the browser's tab icon.
+- **Claude Code and Codex.** Model, effort and permission mode per
+  session. Permission requests are cards: Allow or Deny.
+- **Files beside the agent.** Code, editable and saved with Ctrl+S.
+  PDFs with search and SyncTeX both ways. Word documents as pages. CSV as
+  tables. Images, SVG, video, audio. Archives as a tree. A file the agent
+  changes re-renders at once.
+- **An eye on cost.** Each session shows how full its context is and how
+  long its prompt cache stays warm, which is what decides what the next
+  message costs. A big session left idle is compacted before the cache
+  goes cold, so coming back after a break is cheap. On by default, off
+  per session.
+- **Alongside the terminal.** A session you drive in the terminal shows
+  live, marked as open elsewhere so you do not write to it twice. Deleted
+  sessions go to a trash with undo.
+- **The same page on a phone.** One pane, the explorer as a drawer, the
+  same tabs. Light and dark themes.
+
+If you write LaTeX, the PDF opens beside the agent and re-renders as it
+recompiles, with SyncTeX both ways:
+
+![Claude fixes two typos in a .tex file and recompiles; the PDF beside it updates](docs/dakort-latex.gif)
 
 ## Install
 
-Coming with the first release:
+### macOS
 
 ```
-brew install dakort-app/tap/dakort     # macOS
-winget install dakort                  # Windows
-scoop install dakort                   # Windows, alternatively
-apt install ./dakort_*.deb             # Debian and Ubuntu, from the release page
-```
-
-Then, once:
-
-```
+brew install dakort-app/tap/dakort
 dakort setup
 ```
 
-That installs it as a background service that runs at boot, finds the
-Claude Code and Codex CLIs, shows the address for your phone as a QR code,
-and opens the page, which asks you to choose a password.
-`dakort setup -uninstall` removes the service.
+### Windows
 
-When a newer release is out, the page says so. Then, on the computer:
+With [Scoop](https://scoop.sh):
+
+```
+scoop bucket add dakort https://github.com/dakort-app/scoop-bucket
+scoop install dakort
+dakort setup
+```
+
+With winget, once Microsoft has reviewed the package (some days after a
+release):
+
+```
+winget install dakort
+dakort setup
+```
+
+Or unzip the Windows archive from the
+[release page](https://github.com/dakort-app/dakort/releases) anywhere
+and run `dakort setup` from there. SmartScreen warns the first time; the
+binary is not code-signed yet.
+
+### Linux
+
+From the [release page](https://github.com/dakort-app/dakort/releases):
+a `.deb` for Debian and Ubuntu, an `.rpm` for Fedora and friends, a
+`.tar.gz` for the rest. amd64 and arm64.
+
+```
+sudo apt install ./dakort_*_linux_amd64.deb
+dakort setup
+```
+
+### What setup does
+
+Installs Dakort as a service that starts when you log in. Finds the
+Claude Code and Codex CLIs. Shows your phone's address as a QR code and
+opens the page, which asks you to choose a password.
+
+`dakort setup -uninstall` removes the service; your sessions stay. On
+Windows, `dakort setup -at-boot` runs it before anyone logs in, for a
+machine nobody signs in to. Codex's shell commands do not work there; its
+sandbox needs a signed-in desktop.
+
+### Updating
+
+The page says when a newer release is out. Then, on the computer:
 
 ```
 dakort update
 ```
 
-It fetches the release, checks it, and restarts the service with it once
-nothing is running. (After an update through brew, winget or scoop, run
-`dakort setup` again instead; it does the same hand-over with the new
-binary.)
+It fetches the release, checks it, and restarts the service once nothing
+is running. After an update through brew, winget or scoop, run
+`dakort setup` again instead.
 
 ## What it needs
 
 - [Claude Code](https://claude.com/claude-code) or [Codex](https://github.com/openai/codex),
-  installed and signed in. Dakort drives the real CLIs; it is not an agent
-  of its own.
-- [Tailscale](https://tailscale.com) on the computer and the phone, to
-  reach it from outside the house. Without it, Dakort listens on the
-  computer only.
+  installed and signed in. Dakort drives the real CLIs. It has no keys of
+  its own.
+- [Tailscale](https://tailscale.com) on the computer and the phone, for
+  the phone. Without it, Dakort listens on the computer only, and picks
+  Tailscale up when it is installed later.
+
+## How it works
+
+The server reads the session files Claude Code and Codex keep, and watches
+them, so a terminal session shows as it goes. Each message you send runs
+the CLI for one turn in the project's folder, `claude -p --resume` or
+Codex's app-server, and streams the result. The page is one embedded web
+app, the same on a laptop and a phone.
+
+It listens on this computer and your Tailscale addresses only; other
+addresses are refused unless you ask. The page is behind a password you
+choose, or the token link setup prints on the computer. The only outward
+request is to GitHub's releases every six hours, for the update notice.
+
+## Questions
+
+### How is this different from Claude Desktop?
+
+Claude Desktop is session-centric. It is one window with one list of
+sessions, each with a folder attached, and the list holds only the
+sessions it started itself. 
+
+Dakort shows every session the CLIs have on
+disk, Claude Code and Codex, grouped by project, with the project's files
+beside them, and the same page opens on a phone. 
+
+
+### Does it change my Claude Code or Codex setup?
+
+No. It reads the session files the CLIs keep and runs the CLIs for each
+turn, so the sessions are written by the CLIs, as in a terminal. 
+Uninstalling removes the service and leaves
+your sessions where they were.
+
+### Does the computer have to stay on?
+
+Yes. The agents run on it, and Dakort is the page in front of them. The
+phone is a window, not a second computer.
 
 ## Building from source
 

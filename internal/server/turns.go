@@ -84,6 +84,7 @@ type sendRequest struct {
 	Effort         string `json:"effort"`
 	PermissionMode string `json:"permissionMode"`
 	Ultracode      *bool  `json:"ultracode"` // nil keeps what the session had
+	Chrome         *bool  `json:"chrome"`    // Claude in Chrome's tools; nil keeps what the session had
 	// Force sends even though another process holds the session. Both
 	// then append to the transcript as separate branches (see NOTES).
 	Force bool `json:"force"`
@@ -106,6 +107,7 @@ type sendReply struct {
 type sessionSettings struct {
 	model, effort, permissionMode string
 	ultracode                     bool
+	chrome                        bool // off by default: the 18 tools cost context on every turn
 	noIdleCompact                 bool // idle compaction is on unless switched off
 }
 
@@ -254,7 +256,7 @@ func (r *runner) send(session string, req sendRequest) (sendReply, error) {
 	} else {
 		opts := claude.Options{
 			Bin: bin, Cwd: cwd, Model: st.model, Effort: st.effort, PermissionMode: st.permissionMode,
-			ReplayUserMessages: true,
+			ReplayUserMessages: true, Chrome: st.chrome,
 		}
 		if st.ultracode {
 			opts.Settings = `{"ultracode":true}`
@@ -370,7 +372,7 @@ func (r *runner) reserve(session string, req sendRequest) (_ *turn, _ sendReply,
 }
 
 // sendHeld hands a prompt to a held process. The model and permission mode
-// are switched first if the send changed them; effort and Ultracode are
+// are switched first if the send changed them; effort, Ultracode and Chrome are
 // flags only, so they apply from the next fresh process.
 func (r *runner) sendHeld(t *turn, st sessionSettings, req sendRequest) {
 	r.mu.Lock()
@@ -479,6 +481,9 @@ func (r *runner) settings(session string, req sendRequest) sessionSettings {
 	if req.Ultracode != nil {
 		st.ultracode = *req.Ultracode
 	}
+	if req.Chrome != nil {
+		st.chrome = *req.Chrome
+	}
 	if r.setting[session] != st {
 		r.setting[session] = st
 		r.saveSettings()
@@ -493,6 +498,7 @@ type savedSettings struct {
 	Effort         string `json:"effort,omitempty"`
 	PermissionMode string `json:"permissionMode,omitempty"`
 	Ultracode      bool   `json:"ultracode,omitempty"`
+	Chrome         bool   `json:"chrome,omitempty"`
 	NoIdleCompact  bool   `json:"noIdleCompact,omitempty"`
 }
 
@@ -513,7 +519,7 @@ func (r *runner) loadSettings(file string) {
 		return
 	}
 	for id, s := range saved {
-		r.setting[id] = sessionSettings{model: s.Model, effort: s.Effort, permissionMode: s.PermissionMode, ultracode: s.Ultracode, noIdleCompact: s.NoIdleCompact}
+		r.setting[id] = sessionSettings{model: s.Model, effort: s.Effort, permissionMode: s.PermissionMode, ultracode: s.Ultracode, chrome: s.Chrome, noIdleCompact: s.NoIdleCompact}
 	}
 }
 
@@ -526,7 +532,7 @@ func (r *runner) saveSettings() {
 	out := make(map[string]savedSettings, len(r.setting))
 	for id, s := range r.setting {
 		if s != (sessionSettings{}) {
-			out[id] = savedSettings{Model: s.model, Effort: s.effort, PermissionMode: s.permissionMode, Ultracode: s.ultracode, NoIdleCompact: s.noIdleCompact}
+			out[id] = savedSettings{Model: s.model, Effort: s.effort, PermissionMode: s.permissionMode, Ultracode: s.ultracode, Chrome: s.chrome, NoIdleCompact: s.noIdleCompact}
 		}
 	}
 	data, _ := json.MarshalIndent(out, "", " ")

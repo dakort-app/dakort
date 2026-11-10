@@ -28,7 +28,7 @@ func post(t *testing.T, url string, body any) (int, []byte) {
 	data, _ := json.Marshal(body)
 	req, _ := http.NewRequest("POST", url, bytes.NewReader(data))
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{Name: "made_token", Value: token})
+	req.AddCookie(&http.Cookie{Name: "dakort_token", Value: token})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func openStream(t *testing.T, base, last string) *stream {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	req, _ := http.NewRequestWithContext(ctx, "GET", base+"/api/events?last="+last, nil)
-	req.AddCookie(&http.Cookie{Name: "made_token", Value: token})
+	req.AddCookie(&http.Cookie{Name: "dakort_token", Value: token})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -605,7 +605,7 @@ func TestSendRefusals(t *testing.T) {
 
 	req, _ := http.NewRequest("POST", f.srv.URL+"/api/sessions/s1/send", strings.NewReader(`{"promptId":"p","text":"hi"}`))
 	req.Header.Set("Content-Type", "text/plain")
-	req.AddCookie(&http.Cookie{Name: "made_token", Value: token})
+	req.AddCookie(&http.Cookie{Name: "dakort_token", Value: token})
 	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != http.StatusUnsupportedMediaType {
 		t.Errorf("form-style post: %v %v", resp.StatusCode, err)
 	}

@@ -48,7 +48,7 @@ export function tableWindow(model: string): Window | null {
   return { tokens: /^claude-[a-z]+-[5-9]/.test(m) ? M : K200, assumed: true }
 }
 
-const key = 'made.windows'
+const key = 'dakort.windows'
 let seen: Record<string, number> = (() => {
   try {
     return JSON.parse(localStorage.getItem(key) || '{}')

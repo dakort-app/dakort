@@ -1,8 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
 // Phone checks in WebKit, Safari's engine, with an iPhone's screen and
-// touch. They run against a server already listening (MADE_URL, default
-// 127.0.0.1:3002) and log in with MADE_TOKEN; without a token they skip.
+// touch. They run against a server already listening (DAKORT_URL, default
+// 127.0.0.1:3002) and log in with DAKORT_TOKEN; without a token they skip.
 // Not real iOS: no on-screen keyboard, and momentum scrolling differs.
 export default defineConfig({
   testDir: 'e2e',
@@ -14,7 +14,7 @@ export default defineConfig({
   workers: 1,
   use: {
     ...devices['iPhone 15'],
-    baseURL: process.env.MADE_URL ?? 'http://127.0.0.1:3002',
+    baseURL: process.env.DAKORT_URL ?? 'http://127.0.0.1:3002',
   },
   projects: [
     { name: 'iphone-webkit', use: { browserName: 'webkit' } },

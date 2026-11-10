@@ -5,10 +5,14 @@
 // recreates the stream after 40 s without anything (pings come every 15
 // s), and so does coming back to the page. A stream this code recreates
 // does not send Last-Event-ID, so the last id travels as ?last=.
+//
+// The last id lives in memory, not in sessionStorage: a resumed stream
+// replays only what came after it, with no snapshot, and a reloaded page
+// starts knowing nothing. Kept across a reload, it hid a running turn
+// (no Stop, no dot) until the turn ended. A fresh page gets the snapshot.
 
 import type { Ev } from './types'
 
-const lastKey = 'made.lastEvent'
 const silence = 40_000
 
 export type StreamState = 'connecting' | 'open' | 'auth'
@@ -19,6 +23,7 @@ export class Stream {
   private timer = 0
   private retry = 0
   private stopped = false
+  private last = ''
   private onEvent: (e: Ev) => void
   private onState: (s: StreamState) => void
 
@@ -56,8 +61,7 @@ export class Stream {
     clearTimeout(this.retry)
     this.heard = Date.now()
     this.onState('connecting')
-    const last = sessionStorage.getItem(lastKey) ?? ''
-    const es = new EventSource(`/api/events?last=${encodeURIComponent(last)}`)
+    const es = new EventSource(`/api/events?last=${encodeURIComponent(this.last)}`)
     this.es = es
     es.onopen = () => {
       this.heard = Date.now()
@@ -66,7 +70,7 @@ export class Stream {
     es.onmessage = (m) => {
       if (es !== this.es) return
       this.heard = Date.now()
-      if (m.lastEventId) sessionStorage.setItem(lastKey, m.lastEventId)
+      if (m.lastEventId) this.last = m.lastEventId
       let e: Ev
       try {
         e = JSON.parse(m.data)

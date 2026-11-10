@@ -43,6 +43,11 @@ type Options struct {
 	// event carrying its transcript uuid.
 	ReplayUserMessages bool
 
+	// Chrome gives the turn the Claude in Chrome tools (--chrome). In -p
+	// mode the CLI leaves them off even when the user's settings enable
+	// them by default (see NOTES).
+	Chrome bool
+
 	ExtraArgs []string
 	Env       []string // added to the inherited environment
 
@@ -106,6 +111,9 @@ func (o Options) args() []string {
 	}
 	if o.ReplayUserMessages {
 		a = append(a, "--replay-user-messages")
+	}
+	if o.Chrome {
+		a = append(a, "--chrome")
 	}
 	return append(a, o.ExtraArgs...)
 }

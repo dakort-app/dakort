@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyEvent, emptyLive, landed, liveBlocks, type Live } from './live'
+import { applyEvent, busy, emptyLive, landed, liveBlocks, type Live } from './live'
 import type { Ev, LiveBlock, Row } from './types'
 
 const run = (evs: Ev[], from: Live = emptyLive) => evs.reduce(applyEvent, from)
@@ -89,10 +89,13 @@ describe('background tasks', () => {
     const k = { id: 'b1', type: 'local_bash', description: 'Build' }
     let l: Live = applyEvent(emptyLive, { type: 'turn', session: 's', state: 'running' })
     l = applyEvent(l, { type: 'tasks', session: 's', tasks: [k] })
+    expect(busy(l, 's')).toBe('run')
     l = applyEvent(l, { type: 'turn', session: 's', state: 'done', result: { ok: true } })
     expect(l.tasks.s).toEqual([k])
+    expect(busy(l, 's')).toBe('tasks') // the turn has ended, its agents have not
     l = applyEvent(l, { type: 'tasks', session: 's', tasks: [] })
     expect(l.tasks.s).toBeUndefined()
+    expect(busy(l, 's')).toBe('')
     l = applyEvent(l, { type: 'snapshot', turns: [], background: { t: [k] } })
     expect(l.tasks).toEqual({ t: [k] })
   })

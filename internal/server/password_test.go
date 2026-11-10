@@ -36,7 +36,7 @@ func postAs(t *testing.T, url string, body any, viaServe bool) (int, string, *ht
 	out, _ := io.ReadAll(resp.Body)
 	var c *http.Cookie
 	for _, k := range resp.Cookies() {
-		if k.Name == "made_token" {
+		if k.Name == "dakort_token" {
 			c = k
 		}
 	}

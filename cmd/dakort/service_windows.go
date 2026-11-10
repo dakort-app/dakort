@@ -11,14 +11,25 @@ import (
 	"unsafe"
 )
 
-// On Windows the service is a scheduled task that runs at boot, before
-// anyone logs in, under the user's account with normal rights (S4U logon,
-// Limited run level), running a cmd wrapper: it sets PATH, keeps the log,
-// and restarts the server when it exits with code 75 after swapping in a
-// staged build. Registering a task with a boot trigger needs
-// administrator rights, so the install step runs elevated (one UAC
-// prompt); when that is declined, the task runs from the user's next
-// login instead, which needs none.
+// On Windows the service is a scheduled task under the user's account
+// with normal rights (Limited run level), running a cmd wrapper: it sets
+// PATH, keeps the log, and restarts the server when it exits with code 75
+// after swapping in a staged build.
+//
+// By default the task runs from the user's login, in their session
+// (Interactive logon), started under a headless console host so no window
+// shows. It has to: Codex's Windows sandbox puts every shell command on a
+// private desktop of the interactive window station, and from a task
+// running before login (session 0) PowerShell died at once with
+// STATUS_DLL_INIT_FAILED, 0xC0000142 (measured 2026-11-05; cmd.exe mostly
+// survived, Claude's own tools were never affected). Registering at login
+// needs no administrator rights.
+//
+// With -at-boot the task runs at boot, before anyone logs in (S4U logon,
+// session 0), for a machine nobody signs in to; Codex's shell commands
+// fail there. A boot trigger needs administrator rights, so that install
+// step runs elevated (one UAC prompt); when that is declined, the task
+// is registered from login instead.
 
 const defaultServiceName = "Dakort"
 
@@ -54,7 +65,7 @@ func (s winService) definition() string {
 	}
 	lines := []string{
 		"@echo off",
-		fmt.Sprintf(`rem Run by the "%s" scheduled task. Written by dakort setup.`, s.o.name),
+		fmt.Sprintf(`rem Run by the "%s" scheduled task, %s. Written by dakort setup.`, s.o.name, s.when()),
 		fmt.Sprintf(`set "PATH=%s"`, servicePATH()),
 		":run",
 		fmt.Sprintf(`for %%%%F in ("%s") do if %%%%~zF GTR %d move /y "%s" "%s.old" >nul`, s.log(), serviceLogRoll, s.log(), s.log()),
@@ -75,6 +86,26 @@ func (s winService) definition() string {
 		"",
 	}
 	return strings.Join(lines, "\r\n")
+}
+
+// when says where the task runs, in the wrapper and the messages: "from
+// login" (the user's session) or "at boot" (session 0). A change between
+// the two changes the wrapper, so setup takes the cold path and registers
+// the task again.
+func (s winService) when() string {
+	if s.o.atBoot {
+		return "at boot"
+	}
+	return "from login"
+}
+
+// installedAtBoot reports the installed task as the boot kind, from its
+// wrapper (one written before the choice existed ran at boot). That kind
+// was registered with administrator rights and needs them to be replaced
+// or removed.
+func (s winService) installedAtBoot() bool {
+	cur, err := os.ReadFile(s.wrapper())
+	return err == nil && !strings.Contains(string(cur), "from login")
 }
 
 func (s winService) installed() bool {
@@ -122,12 +153,16 @@ if ($Remove) {
 }
 if (Test-Path "$Cmd.new") { Move-Item -Force "$Cmd.new" $Cmd }
 if (Test-Path $Staged) { Move-Item -Force $Staged $Exe }
-$action = New-ScheduledTaskAction -Execute 'C:\Windows\System32\cmd.exe' -Argument "/d /c ` + "`\"`\"$Cmd`\"`\"" + `"
 $user = "$env:USERDOMAIN\$env:USERNAME"
 if ($AtLogon) {
+  # In the user's session a console window would show, so a headless console host runs the wrapper.
+  # conhost quotes again what it passes on, which breaks cmd's ""path"" form on a path with a space
+  # (cmd ran nothing and exited 0); the one pair of quotes survives it.
+  $action = New-ScheduledTaskAction -Execute 'C:\Windows\System32\conhost.exe' -Argument "--headless C:\Windows\System32\cmd.exe /d /c ` + "`\"$Cmd`\"" + `"
   $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
   $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
 } else {
+  $action = New-ScheduledTaskAction -Execute 'C:\Windows\System32\cmd.exe' -Argument "/d /c ` + "`\"`\"$Cmd`\"`\"" + `"
   $trigger = New-ScheduledTaskTrigger -AtStartup
   $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType S4U -RunLevel Limited
 }
@@ -156,6 +191,36 @@ func (s winService) install() error {
 	if err := os.WriteFile(s.wrapper()+".new", []byte(s.definition()), 0o600); err != nil {
 		return err
 	}
+	// From login needs no rights of its own. A task registered with
+	// administrator rights (the boot kind, or a login one an elevated setup
+	// registered) can't be replaced without them (0x80070005, measured
+	// 2026-11-05), so it is removed with them, once, and the login task is
+	// registered by this user, who can replace it from then on.
+	if !s.o.atBoot && !elevated() {
+		if s.installedAtBoot() {
+			if err := s.removeElevated(); err != nil {
+				return err
+			}
+		}
+		err := s.runScript("-AtLogon")
+		if err != nil && strings.Contains(err.Error(), "0x80070005") {
+			if err = s.removeElevated(); err == nil {
+				err = s.runScript("-AtLogon")
+			}
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s registered to run from login, and runs now\n", s.o.name)
+		return nil
+	}
+	if !s.o.atBoot {
+		if err := s.runScript("-AtLogon"); err != nil {
+			return err
+		}
+		fmt.Printf("%s registered to run from login, and runs now\n", s.o.name)
+		return nil
+	}
 	if elevated() {
 		if err := s.runScript(); err != nil {
 			return err
@@ -171,6 +236,7 @@ func (s winService) install() error {
 	if s.o.data != "" {
 		args = append(args, "-data", s.o.data)
 	}
+	args = append(args, "-at-boot")
 	fmt.Println("registering the task to run at boot needs administrator rights once; asking...")
 	err := runElevated(args)
 	if text, rerr := os.ReadFile(out); rerr == nil && strings.TrimSpace(string(text)) != "" {
@@ -182,27 +248,63 @@ func (s winService) install() error {
 	if !errors.Is(err, errDeclined) {
 		return err
 	}
-	fmt.Println("no administrator rights; registering it to run from your next login instead, which needs none")
+	fmt.Println("no administrator rights; registering it to run from login, which needs none")
 	if err := s.runScript("-AtLogon"); err != nil {
 		return err
 	}
-	fmt.Printf("%s registered to run from your next login (run dakort setup from an administrator terminal to have it run at boot instead)\n", s.o.name)
+	fmt.Printf("%s registered to run from login, and runs now\n", s.o.name)
+	return nil
+}
+
+// startDirect runs the wrapper (so the log and the restart loop work as
+// under the task) with no window, detached from this process.
+func (s winService) startDirect() error {
+	const createNoWindow, createNewProcessGroup = 0x08000000, 0x00000200
+	cmd := exec.Command("cmd", "/d", "/c", s.wrapper())
+	cmd.Dir = s.o.home
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNoWindow | createNewProcessGroup}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go cmd.Wait() // reap it if it ends before this process does
+	return nil
+}
+
+// removeElevated removes the task, and stops its server, with administrator
+// rights asked for once: the elevated copy of this command uninstalls.
+func (s winService) removeElevated() error {
+	fmt.Printf("the %s task was registered with administrator rights, and removing it needs them once; asking...\n", s.o.name)
+	out := filepath.Join(s.logs(), "setup-step.log")
+	os.Remove(out)
+	if err := runElevated([]string{"setup", "-uninstall", "-out", out, "-name", s.o.name, "-home", s.o.home}); err != nil {
+		if text, rerr := os.ReadFile(out); rerr == nil {
+			fmt.Print(string(text))
+		}
+		return fmt.Errorf("removing the old %s task: %w", s.o.name, err)
+	}
 	return nil
 }
 
 func (s winService) remove() error {
 	if !s.installed() {
+		// No task, but a server started directly (startDirect) may still
+		// run from the wrapper: the script stops that too.
+		if exists(s.wrapper()) {
+			return s.runScript("-Remove")
+		}
 		return nil
 	}
 	if elevated() {
 		return s.runScript("-Remove")
 	}
-	out := filepath.Join(s.logs(), "setup-step.log")
-	if err := runElevated([]string{"setup", "-uninstall", "-out", out, "-name", s.o.name, "-home", s.o.home}); err != nil {
-		// A task registered at logon by this user can be removed by them.
-		return s.runScript("-Remove")
+	// A login task this user registered, they can remove.
+	if !s.installedAtBoot() {
+		err := s.runScript("-Remove")
+		if err == nil || !strings.Contains(err.Error(), "0x80070005") {
+			return err
+		}
 	}
-	return nil
+	return s.removeElevated()
 }
 
 var (

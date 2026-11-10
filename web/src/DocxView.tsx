@@ -2,7 +2,7 @@ import { renderAsync } from 'docx-preview'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FindBar } from './FindBar'
 import { fileURL, SaveButton } from './FileView'
-import { foldQuery, pageText, spans } from './pdffind'
+import { foldQuery, pageText, spans, type FindOpts } from './pdffind'
 
 // A Word file drawn in the browser by docx-preview: pages as Word lays
 // them out, near enough (fonts the browser lacks are substituted). A new
@@ -139,7 +139,14 @@ export function DocxView({ root, path, version }: Props) {
   const closeFind = () => {
     setFinding(false)
     setHits(null)
+    searched.current = false
   }
+  // A switch flipped after a search runs it again with the new rule.
+  const [findOpts, setFindOpts] = useState<FindOpts>({})
+  const searched = useRef(false)
+  useEffect(() => {
+    if (searched.current) step(false)
+  }, [findOpts])
   // Bring a match a third of the way down the view (and across, if zoomed
   // in past the width).
   const show = (list: Range[], i: number) => {
@@ -158,8 +165,9 @@ export function DocxView({ root, path, version }: Props) {
       if (hits.length) show(hits, (cur + (back ? -1 : 1) + hits.length) % hits.length)
       return
     }
+    searched.current = true
     const pt = pageText(runsOf(pages.current))
-    const list = spans(pt, want).map(({ s, e }) => {
+    const list = spans(pt, want, findOpts).map(({ s, e }) => {
       const r = document.createRange()
       r.setStart(pt.runs[s.run].node, s.ch)
       const end = pt.runs[e.run].node
@@ -167,10 +175,18 @@ export function DocxView({ root, path, version }: Props) {
       return r
     })
     setHits(list)
-    // The first match below the top of the view.
-    const top = box.current?.getBoundingClientRect().top ?? 0
-    const from = list.findIndex((r) => r.getBoundingClientRect().bottom >= top)
-    show(list, from < 0 ? 0 : from)
+    // The first match down from the top of the view, or (Shift+Enter) up
+    // from its bottom; round the end when there is none that way.
+    const v = box.current?.getBoundingClientRect()
+    let from: number
+    if (back) {
+      from = list.findLastIndex((r) => r.getBoundingClientRect().top <= (v?.bottom ?? Infinity))
+      if (from < 0) from = list.length - 1
+    } else {
+      from = list.findIndex((r) => r.getBoundingClientRect().bottom >= (v?.top ?? 0))
+      if (from < 0) from = 0
+    }
+    show(list, from)
   }
 
   return (
@@ -209,6 +225,11 @@ export function DocxView({ root, path, version }: Props) {
           onQuery={(v) => {
             setQ(v)
             setHits(null)
+          }}
+          opts={findOpts}
+          onOpts={(o) => {
+            setHits(null)
+            setFindOpts(o)
           }}
           total={hits ? hits.length : null}
           cur={cur}

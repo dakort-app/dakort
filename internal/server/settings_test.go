@@ -33,6 +33,7 @@ func TestSettingsKeptAtOnce(t *testing.T) {
 		ID        string
 		Effort    string
 		Ultracode bool
+		Chrome    bool
 	}
 	get := func(base string) sess {
 		t.Helper()
@@ -48,20 +49,20 @@ func TestSettingsKeptAtOnce(t *testing.T) {
 	id := get(base).ID
 	st := openStream(t, base, "")
 	pos := 0
-	if code, out := post(t, base+"/api/sessions/"+id+"/settings", map[string]any{"effort": "low", "ultracode": true}); code != 200 {
+	if code, out := post(t, base+"/api/sessions/"+id+"/settings", map[string]any{"effort": "low", "ultracode": true, "chrome": true}); code != 200 {
 		t.Fatalf("pick: %d %s", code, out)
 	}
 	st.wait(t, &pos, "sessions event", func(e server.Ev) bool { return e.Type == "sessions" })
-	if s := get(base); s.Effort != "low" || !s.Ultracode {
+	if s := get(base); s.Effort != "low" || !s.Ultracode || !s.Chrome {
 		t.Errorf("after the pick: %+v", s)
 	}
 
-	if s := get(start()); s.Effort != "low" || !s.Ultracode {
+	if s := get(start()); s.Effort != "low" || !s.Ultracode || !s.Chrome {
 		t.Errorf("after a restart: %+v", s)
 	}
 
-	post(t, base+"/api/sessions/"+id+"/settings", map[string]any{"effort": "default", "ultracode": false})
-	if s := get(base); s.Effort != "" || s.Ultracode {
+	post(t, base+"/api/sessions/"+id+"/settings", map[string]any{"effort": "default", "ultracode": false, "chrome": false})
+	if s := get(base); s.Effort != "" || s.Ultracode || s.Chrome {
 		t.Errorf("after default: %+v", s)
 	}
 

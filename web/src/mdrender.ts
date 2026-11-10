@@ -44,7 +44,38 @@ function make() {
     md.renderer.rules[rule] = (tokens, idx, options, env, self) =>
       `<div class="code-block">${plainRule(tokens, idx, options, env, self)}${copyButton}</div>\n`
   }
+  md.core.ruler.push('table_columns', (state) => markColumns(state.tokens))
   return md
+}
+
+// A table's short columns do not wrap and its long ones keep some width.
+// Laid out as it came, a table with one column of sentences gave that one
+// nearly all the width and cut the others down to their longest word, one
+// word a line ("Moderate, / needs / LibreOffice"); it never scrolled, as
+// squeezing always made it fit. Now the long column wraps and a table too
+// wide for the screen scrolls.
+const shortCell = 30 // characters, with Markdown's marks left out
+
+type Tok = { type: string; content: string; attrJoin(name: string, value: string): void }
+
+function markColumns(tokens: Tok[]) {
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i].type !== 'table_open') continue
+    const cells: { tok: Tok; col: number }[] = []
+    const longest: number[] = []
+    let col = 0
+    let j = i + 1
+    for (; j < tokens.length && tokens[j].type !== 'table_close'; j++) {
+      const t = tokens[j]
+      if (t.type === 'tr_open') col = 0
+      if (t.type !== 'th_open' && t.type !== 'td_open') continue
+      const len = (tokens[j + 1]?.type === 'inline' ? tokens[j + 1].content : '').replace(/[*_`]/g, '').length
+      longest[col] = Math.max(longest[col] ?? 0, len)
+      cells.push({ tok: t, col: col++ })
+    }
+    for (const c of cells) c.tok.attrJoin('class', longest[c.col] <= shortCell ? 'short' : 'long')
+    i = j
+  }
 }
 
 // The icons are icons.tsx's CopyIcon and CheckIcon; CSS shows one.

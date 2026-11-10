@@ -20,8 +20,8 @@ export type Tabs = Pane & { right?: Pane; focus?: 'right'; ratio?: number }
 export const folderKey = (p: string) => (/^[a-z]:[\\/]/i.test(p) ? p.toLowerCase() : p)
 export const sameFolder = (a: string | undefined, b: string) => a !== undefined && folderKey(a) === folderKey(b)
 
-const tabsKey = (folder: string) => 'made.tabs:' + folderKey(folder)
-const lastKey = 'made.lastFolder'
+const tabsKey = (folder: string) => 'dakort.tabs:' + folderKey(folder)
+const lastKey = 'dakort.lastFolder'
 
 // The folder last on screen, where the app opens next time.
 export const lastFolder = () => localStorage.getItem(lastKey) ?? ''
@@ -57,31 +57,31 @@ export function followMoves(moves: Move[]) {
       localStorage.removeItem(key)
     }
   }
-  rekey('made.tabs:', folderKey)
-  rekey('made.draft:new:')
+  rekey('dakort.tabs:', folderKey)
+  rekey('dakort.draft:new:')
   const last = lastFolder()
   if (last && movedPath(last, moves) !== last) setLastFolder(movedPath(last, moves))
 }
 
 // Whether the explorer shows on a laptop, also in the next folder.
-const explorerShownKey = 'made.explorerShown'
+const explorerShownKey = 'dakort.explorerShown'
 export const explorerShown = () => localStorage.getItem(explorerShownKey) !== '0'
 export const setExplorerShown = (on: boolean) => localStorage.setItem(explorerShownKey, on ? '1' : '0')
 
 // How the explorer sorts: newest first unless A–Z was picked.
-const filesSortKey = 'made.filesSort'
+const filesSortKey = 'dakort.filesSort'
 export const filesByName = () => localStorage.getItem(filesSortKey) === 'name'
 export const setFilesByName = (on: boolean) => localStorage.setItem(filesSortKey, on ? 'name' : 'date')
 
 // The explorer's width on a laptop, as dragged.
-const explorerKey = 'made.explorerWidth'
+const explorerKey = 'dakort.explorerWidth'
 export const explorerWidth = () => Number(localStorage.getItem(explorerKey)) || 280
 export const setExplorerWidth = (w: number) => localStorage.setItem(explorerKey, String(Math.round(w)))
 
 export function loadTabs(folder: string): Tabs {
   try {
     // saved under the spelling itself before folderKey
-    const t = JSON.parse(localStorage.getItem(tabsKey(folder)) ?? localStorage.getItem('made.tabs:' + folder) ?? '')
+    const t = JSON.parse(localStorage.getItem(tabsKey(folder)) ?? localStorage.getItem('dakort.tabs:' + folder) ?? '')
     if (Array.isArray(t.ids)) {
       const strings = (l: unknown[]) => l.filter((x): x is string => typeof x === 'string')
       const out: Tabs = { ids: strings(t.ids), active: String(t.active ?? '') }
@@ -331,3 +331,15 @@ export function isUnread(s: Session): boolean {
 // page title.
 export const finishedIn = (ids: string[], sessions: Session[], folder: string) =>
   folder ? ids.filter((id) => sameFolder(sessions.find((s) => s.id === id)?.folder, folder)).length : ids.length
+
+// resumeCommand continues a session in a terminal. The terminal's /resume
+// picker does not list sessions the CLI ran headless (all of Dakort's), but
+// --resume with the id opens them; the CLI looks for the id in the
+// project of the folder it runs in, hence the cd. `;` and single quotes
+// read the same in PowerShell, bash and zsh.
+export function resumeCommand(s: Pick<Session, 'id' | 'provider' | 'cwd'>): string {
+  const run = s.provider === 'codex' ? `codex resume ${s.id}` : `claude --resume ${s.id}`
+  if (!s.cwd) return run
+  const dir = s.cwd.includes("'") ? `"${s.cwd}"` : `'${s.cwd}'`
+  return `cd ${dir}; ${run}`
+}

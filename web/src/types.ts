@@ -58,6 +58,7 @@ export type Session = {
   model?: string
   effort?: string
   ultracode?: boolean
+  chrome?: boolean // Claude in Chrome on for its turns
   permissionMode?: string
   idleCompact?: boolean // compacted shortly before its prompt cache expires; on unless switched off
 }

@@ -52,3 +52,15 @@ describe('markdown files', () => {
     expect(prices).toContain('$5 and $10')
   })
 })
+
+describe('tables', () => {
+  it('marks short columns whole and long ones wrapping, by their longest cell', () => {
+    const long = 'No good in-browser viewer exists, so the server converts the file to PDF first.'
+    const html = render(
+      ['| Format | Approach | Effort |', '|---|---|---|', `| **ODT, ODS, ODP, PowerPoint** | ${long} | Moderate, needs LibreOffice |`, '| CSV | short | Easy |', '', 'after'].join('\n'),
+    )
+    const classes = [...html.matchAll(/<t[hd] class="(\w+)"/g)].map((m) => m[1])
+    expect(classes).toEqual(['short', 'long', 'short', 'short', 'long', 'short', 'short', 'long', 'short'])
+    expect(html).toContain('<p>after</p>')
+  })
+})

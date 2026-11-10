@@ -94,6 +94,7 @@ func (s macService) install() error {
 	// Unload first: a loaded agent is restarted by launchd the moment its
 	// process ends, and the swap must happen while nothing runs it.
 	exec.Command("launchctl", "bootout", s.domain()+"/"+s.o.name).Run()
+	stopDetached(s.exe())
 	if exists(s.staged()) {
 		if err := os.Rename(s.staged(), s.exe()); err != nil {
 			return err
@@ -109,7 +110,12 @@ func (s macService) install() error {
 	return nil
 }
 
+func (s macService) startDirect() error {
+	return startDetached(s.exe(), s.o.serverArgs(), s.o.home, s.log())
+}
+
 func (s macService) remove() error {
+	stopDetached(s.exe())
 	if !s.installed() {
 		return nil
 	}

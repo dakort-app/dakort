@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent, type ReactNode } from 'react'
 import { useLastProvider } from './Composer'
 import { Explorer } from './Explorer'
-import { FileView, type Jump, type Opener } from './FileView'
-import { FolderList, useOtherActivity } from './FolderBar'
+import { FileView, fileKey, unsaved, type Jump, type Opener } from './FileView'
+import { ActivityDot, FolderList, useOtherActivity } from './FolderBar'
 import { StreamDot } from './Home'
 import { AgentIcon, FileIcon, HistoryIcon, NewChatIcon, SidebarIcon, SplitIcon, UnsplitIcon } from './icons'
-import { FILE, providerOf, sameFolder, filesByName, setFilesByName, isUnread, loadTabs, markFresh, markSeen, NEW, saveTabs, setExplorerWidth, setLastFolder, tabsFor, type Tabs, explorerWidth, explorerShown, setExplorerShown, reconcile, flat, folderKey } from './local'
+import { FILE, providerOf, sameFolder, filesByName, setFilesByName, isUnread, loadTabs, markFresh, markSeen, NEW, saveTabs, setExplorerWidth, setLastFolder, tabsFor, type Tabs, explorerWidth, explorerShown, setExplorerShown, reconcile, flat, folderKey, resumeCommand } from './local'
+import { copyText } from './clip'
 import { loadSharedTabs, shareTabs } from './store'
 import { clampRatio, closeTab as closeIn, focusOf, merged, moveTab, pane, selectTab, split, splitBeside, unsplit, withPane, type Pane, type PaneNo } from './local'
 import { ago, baseName } from './route'
+import { busy, tasksTitle } from './live'
 import { postJSON } from './api'
 import { SessionView } from './SessionView'
 import { refreshLists, setPlace, useStore } from './store'
@@ -62,7 +64,7 @@ export function Workspace({ folder }: { folder: string }) {
   useEffect(() => {
     loadSharedTabs(folder)
   }, [folder])
-  const hasDraft = (id: string) => id === NEW && !!(localStorage.getItem('made.draft:new:' + folder) || localStorage.getItem('made.draft:new:' + folderKey(folder)))
+  const hasDraft = (id: string) => id === NEW && !!(localStorage.getItem('dakort.draft:new:' + folder) || localStorage.getItem('dakort.draft:new:' + folderKey(folder)))
   // Before the list has loaded, keep the saved tabs as they are.
   const tabs = loaded ? tabsFor(reconcile(saved, shared, hasDraft), mine, (id) => !!live.turns[id], (id) => all.has(id)) : saved
   const update = (t: Tabs) => {
@@ -133,6 +135,8 @@ export function Workspace({ folder }: { folder: string }) {
   }
 
   const byId = new Map(mine.map((s) => [s.id, s]))
+  // An agent working here may write the file being edited (FileView says so).
+  const agentBusy = mine.some((s) => busy(live, s.id) !== '')
   // The sessions on screen, one per pane, count as read; a hidden page
   // marks nothing, and reads once it comes back in front.
   const shown = panes.map((p) => byId.get(view(p).active)).filter((s): s is Session => !!s)
@@ -155,6 +159,7 @@ export function Workspace({ folder }: { folder: string }) {
   // Closing counts the session as read, so unread work does not reopen
   // it on every device the next moment; new activity still does.
   const closeTab = (id: string) => {
+    if (id.startsWith(FILE) && unsaved.has(fileKey(folder, id.slice(FILE.length))) && !window.confirm('Close it and discard your unsaved changes?')) return
     const s = byId.get(id)
     if (s) markSeen(s)
     update(closeIn(tabs, id))
@@ -308,7 +313,8 @@ export function Workspace({ folder }: { folder: string }) {
     }
   }
 
-  // A tab's menu (right-click on a laptop): rename, the other pane, close.
+  // A tab's menu (right-click on a laptop): rename, the other pane, the
+  // command that resumes the session in a terminal, close.
   // On a phone a long press still renames.
   const [menu, setMenu] = useState<{ id: string; p: PaneNo; x: number; y: number } | null>(null)
   useEffect(() => {
@@ -364,6 +370,7 @@ export function Workspace({ folder }: { folder: string }) {
     const s = byId.get(id)
     if (live.turns[id]) return <span className="dot run" title="working" />
     if (s && !shown.includes(s) && isUnread(s)) return <span className="dot unread" title="finished, not seen" />
+    if (busy(live, id) === 'tasks') return <span className="dot tasks" title={tasksTitle} />
     return null
   }
   // Files by their type; sessions by their agent's mark (a new one by the
@@ -390,7 +397,7 @@ export function Workspace({ folder }: { folder: string }) {
           {!files && p === 0 && (
             <button className="icon dotted" onClick={() => setFiles(true)} aria-label="Show the sidebar" title="Show projects and files">
               <SidebarIcon />
-              {otherActivity && <span className="dot unread" title="activity in another project" />}
+              <ActivityDot st={otherActivity} />
             </button>
           )}
           <TabStrip ids={v.ids.join(',')}>
@@ -484,7 +491,7 @@ export function Workspace({ folder }: { folder: string }) {
               const f = id.slice(FILE.length)
               return (
                 <div key={id} className="file-slot" hidden={f !== activeFileHere}>
-                  <FileView root={folder} path={f} onOpen={(path, jump) => openFile(path, jump, p)} jump={jumps[f]} active={f === activeFileHere} />
+                  <FileView root={folder} path={f} onOpen={(path, jump) => openFile(path, jump, p)} jump={jumps[f]} active={f === activeFileHere} agentBusy={agentBusy} />
                 </div>
               )
             })}
@@ -586,7 +593,9 @@ export function Workspace({ folder }: { folder: string }) {
                         ? id.slice(FILE.length)
                         : live.turns[id]
                           ? 'working…'
-                          : byId.get(id)
+                          : busy(live, id) === 'tasks'
+                            ? 'running in the background…'
+                            : byId.get(id)
                             ? ago(byId.get(id)!.updated)
                             : ''}
                     </div>
@@ -639,7 +648,7 @@ export function Workspace({ folder }: { folder: string }) {
                 >
                   <div className="item-main">
                     <div className="item-title ellipsis">
-                      {live.turns[s.id] && <span className="dot run" />}
+                      {busy(live, s.id) && <span className={'dot ' + busy(live, s.id)} />}
                       {s.title}
                       {s.provider === 'codex' && <span className="prov-tag">Codex</span>}
                     </div>
@@ -697,6 +706,26 @@ export function Workspace({ folder }: { folder: string }) {
               </button>
             )
           )}
+          {canRename(menu.id) &&
+            (() => {
+              // A second CLI writing to a session that one has open forks it
+              // (BRIEF), so not while a turn or a process has it.
+              const busy = !!live.turns[menu.id] || !!byId.get(menu.id)?.heldBy
+              return (
+                <button
+                  role="menuitem"
+                  disabled={busy}
+                  title={busy ? 'It is in use; copy it once it is idle' : 'A command that continues this session in a terminal'}
+                  onClick={() => {
+                    const s = byId.get(menu.id)
+                    setMenu(null)
+                    if (s) copyText(resumeCommand(s)).then((ok) => setRenameError(ok ? 'Copied: paste it in a terminal' : 'Copy failed'))
+                  }}
+                >
+                  Copy resume command
+                </button>
+              )
+            })()}
           <button role="menuitem" onClick={() => (setMenu(null), closeTab(menu.id))}>
             Close
           </button>

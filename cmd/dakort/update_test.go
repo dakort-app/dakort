@@ -180,4 +180,3 @@ func exeSuffix() string {
 	}
 	return ""
 }
-

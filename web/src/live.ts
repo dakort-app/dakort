@@ -99,6 +99,16 @@ export function applyEvent(live: Live, e: Ev): Live {
   return live
 }
 
+// busy says what a session is doing now: 'run' while a turn runs, 'tasks'
+// while only its background tasks do (agents, commands, monitors: the turn
+// that started them has ended and a prompt is taken at once), '' when
+// neither. Without 'tasks' a session with agents out read as idle.
+export function busy(live: Live, id: string): '' | 'run' | 'tasks' {
+  if (live.turns[id]) return 'run'
+  return live.tasks[id]?.length ? 'tasks' : ''
+}
+export const tasksTitle = 'agents or commands running in the background; a message is answered now'
+
 // landed says whether finished previews are on screen as rows now: each text
 // in an assistant row with the same text, and a thinking block (shown only as
 // "Thinking…", its row's text may be empty) once any row has come after

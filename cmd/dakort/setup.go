@@ -22,8 +22,8 @@ import (
 )
 
 // dakort setup installs the server as a background service under the
-// user's own account (a scheduled task that runs at boot on Windows, a
-// launchd agent on macOS, a systemd user unit on Linux), then says how to
+// user's own account, from login (a scheduled task on Windows, a launchd
+// agent on macOS, a systemd user unit on Linux), then says how to
 // reach it: the login link on this machine, the phone's address on the
 // tailnet as a QR code, and which CLIs it found. The service runs a copy
 // of this binary from the install folder (bin/dakort), so a package
@@ -41,6 +41,7 @@ import (
 type setupOpts struct {
 	port      int
 	force     bool
+	atBoot    bool // Windows: run at boot, in session 0, instead of from login
 	noBrowser bool
 	https     bool
 	httpsPort int
@@ -64,17 +65,18 @@ func setupMain(args []string) {
 	var o setupOpts
 	fs.IntVar(&o.port, "port", 3002, "the port, on this machine and on the tailnet")
 	fs.BoolVar(&o.force, "force", false, "stop the service even while turns are running")
+	fs.BoolVar(&o.atBoot, "at-boot", false, "Windows: run at boot, before anyone logs in (administrator rights once; Codex's shell commands fail there, its sandbox needs a signed-in desktop)")
 	fs.BoolVar(&o.noBrowser, "no-browser", false, "do not open the browser once the service is up")
 	fs.BoolVar(&o.https, "https", false, "also put it behind Tailscale Serve, for HTTPS on the tailnet (needs HTTPS certificates enabled for the tailnet)")
 	fs.IntVar(&o.httpsPort, "https-port", 443, "the HTTPS port for -https")
 	fs.BoolVar(&o.uninstall, "uninstall", false, "stop and remove the service; the files, token and sessions stay")
 	fs.StringVar(&o.home, "home", "", "the install folder (default: the user's app folder)")
 	fs.StringVar(&o.data, "data", "", "the server's data folder (default: the user's config folder)")
-	fs.StringVar(&o.name, "name", "", "the service's name (default: Dakort)")
+	fs.StringVar(&o.name, "name", "", "the service's name (default: "+defaultServiceName+")")
 	fs.BoolVar(&o.step, "install-step", false, "internal: the elevated install step")
 	fs.StringVar(&o.out, "out", "", "internal: write the output here")
 	fs.Usage = func() {
-		fmt.Fprint(fs.Output(), "usage: dakort setup [flags]\n\nInstalls Dakort as a background service that runs at boot and shows how to reach it.\nRun it again after an update: the server restarts with the new build once no turn runs.\n\n")
+		fmt.Fprint(fs.Output(), "usage: dakort setup [flags]\n\nInstalls Dakort as a background service that runs from login and shows how to reach it.\nRun it again after an update: the server restarts with the new build once no turn runs.\n\n")
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)
@@ -159,7 +161,13 @@ func setup(o setupOpts) error {
 		// running it: a server left on its own (once, by a wrapper that
 		// died) would exit and not come back.
 		if !staged {
-			fmt.Printf("%s is running this build on %s\n", o.name, base)
+			// Run again after installing Claude or Tailscale, as the
+			// first report suggested: the same report, with what is
+			// found now, and no browser (the page is already open).
+			fmt.Printf("%s is running this build already\n", o.name)
+			quiet := o
+			quiet.noBrowser = true
+			report(quiet, svc, base, token)
 			return nil
 		}
 		n, err := askRestart(base, token)
@@ -176,19 +184,27 @@ func setup(o setupOpts) error {
 			return fmt.Errorf("the service must be stopped to install this, and %d turn(s) are running; run again when they finish (or -force)", n)
 		}
 	}
-	if err := svc.install(); err != nil {
-		return err
-	}
-	up = false
-	for i := 0; i < 40 && !up; i++ {
-		time.Sleep(500 * time.Millisecond)
-		up = answering(base)
-	}
-	if !up {
-		return fmt.Errorf("%s is registered but not answering on %s yet; see %s", o.name, base, svc.log())
+	installErr := svc.install()
+	if installErr != nil || !waitUp(base) {
+		// The cold path must not end with the server down: a broken
+		// service definition once left the phone offline (2026-11-05),
+		// and a unit file the service manager refused did the same on
+		// Linux. So the server is started here, outside the service, and
+		// the problem is said out loud.
+		reason := fmt.Sprintf("%s is registered but not answering on %s after 20 seconds", o.name, base)
+		if installErr != nil {
+			reason = fmt.Sprintf("%s could not be installed: %v", o.name, installErr)
+		}
+		fmt.Printf("%s (see %s).\nStarting the server directly so this machine is not cut off; it will not survive a logout or reboot. Run dakort setup again once the cause is fixed.\n", reason, svc.log())
+		if err := svc.startDirect(); err != nil {
+			return fmt.Errorf("%s; starting the server directly: %w", reason, err)
+		}
+		if !waitUp(base) {
+			return fmt.Errorf("%s; the server is not answering on %s even when started directly; see %s", reason, base, svc.log())
+		}
 	}
 	report(o, svc, base, token)
-	return nil
+	return installErr
 }
 
 // report says where the server is and what it found, after a cold install.
@@ -287,6 +303,17 @@ func openBrowser(url string) {
 
 // answering reports whether a server is up at base (401 is up: it wants
 // the login cookie).
+// waitUp gives the server up to 20 seconds to answer on base.
+func waitUp(base string) bool {
+	for i := 0; i < 40; i++ {
+		time.Sleep(500 * time.Millisecond)
+		if answering(base) {
+			return true
+		}
+	}
+	return false
+}
+
 func answering(base string) bool {
 	c := &http.Client{Timeout: 2 * time.Second}
 	resp, err := c.Get(base + "/")
@@ -298,6 +325,10 @@ func answering(base string) bool {
 }
 
 func withToken(req *http.Request, token string) {
+	req.AddCookie(&http.Cookie{Name: "dakort_token", Value: token})
+	// The name before 2026-11-09, for the update that swaps a server from
+	// before the rename: it is asked to restart with the cookie it knows.
+	// Remove after a release or two.
 	req.AddCookie(&http.Cookie{Name: "made_token", Value: token})
 }
 
@@ -367,6 +398,11 @@ type service interface {
 	unchanged() bool // the definition on disk is what install would write
 	install() error  // write the definition, stop, swap the staged build in, register, start
 	remove() error   // stop and unregister
+	// startDirect runs the server outside the service manager, detached
+	// from this process, when the manager failed to bring it up: the
+	// machine stays reachable while the service is mended. The next cold
+	// install ends it (it stops every server run from the install folder).
+	startDirect() error
 }
 
 func exists(p string) bool {

@@ -68,7 +68,7 @@ func TestReleaseNotice(t *testing.T) {
 
 	stream := func(ctx context.Context) *bufio.Scanner {
 		req, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+"/api/events", nil)
-		req.AddCookie(&http.Cookie{Name: "made_token", Value: "tok"})
+		req.AddCookie(&http.Cookie{Name: "dakort_token", Value: "tok"})
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)

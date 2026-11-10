@@ -290,6 +290,37 @@ func TestLastActivity(t *testing.T) {
 	}
 }
 
+// A compaction an hour after the last reply is not activity: its rows (the
+// shape the CLI wrote on 2026-11-08) leave the time at the reply. A prompt
+// after it counts again.
+func TestLastActivityPastCompaction(t *testing.T) {
+	user := func(uuid, ts, extra, content string) string {
+		return `{"parentUuid":null,"type":"user",` + extra + `"message":{"role":"user","content":"` + content + `"},"uuid":"` + uuid + `","timestamp":"` + ts + `","sessionId":"s1"}`
+	}
+	compaction := []string{
+		`{"type":"queue-operation","sessionId":"s1","timestamp":"2026-10-08T03:50:00.000Z"}`,
+		`{"parentUuid":null,"type":"system","subtype":"compact_boundary","content":"Conversation compacted","uuid":"c1","timestamp":"2026-10-08T03:51:00.000Z","sessionId":"s1"}`,
+		user("c2", "2026-10-08T03:51:00.000Z", `"isCompactSummary":true,`, "This session is being continued"),
+		user("c3", "2026-10-08T03:50:00.000Z", `"isMeta":true,`, "<local-command-caveat>Caveat</local-command-caveat>"),
+		user("c4", "2026-10-08T03:50:00.000Z", "", "<command-name>/compact</command-name>"),
+		user("c5", "2026-10-08T03:51:01.000Z", "", "<local-command-stdout>Compacted </local-command-stdout>"),
+		`{"type":"attachment","attachment":{"type":"compact_file_reference"},"uuid":"c6","timestamp":"2026-10-08T03:51:01.000Z","sessionId":"s1"}`,
+	}
+	lines := append(append([]string{}, fixtureLines...), compaction...)
+	got, err := transcript.LastActivity(writeFixture(t, lines, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, _ := time.Parse(time.RFC3339, "2026-10-08T02:55:40Z"); !got.Equal(want) {
+		t.Errorf("got %v, want %v (u8, before the compaction)", got, want)
+	}
+	lines = append(lines, user("p1", "2026-10-08T07:00:00.000Z", "", "good morning"))
+	got, err = transcript.LastActivity(writeFixture(t, lines, ""))
+	if want, _ := time.Parse(time.RFC3339, "2026-10-08T07:00:00Z"); err != nil || !got.Equal(want) {
+		t.Errorf("a prompt after the compaction: got %v, %v, want %v", got, err, want)
+	}
+}
+
 // What a session last ran with: read backwards on a first look, then only
 // what the file gained, including a line that was half written before.
 func TestUsed(t *testing.T) {

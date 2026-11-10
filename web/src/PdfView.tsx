@@ -5,7 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 're
 import { getJSON, HTTPError } from './api'
 import { FindBar } from './FindBar'
 import { fileURL, SaveButton, synctexURL, type Jump, type SyncBox } from './FileView'
-import { find, foldQuery, pageText, type Hit, type PageText, type Run } from './pdffind'
+import { find, foldQuery, pageText, type FindOpts, type Hit, type PageText, type Run } from './pdffind'
 import { GAP, posAt, scrollFor, tops, type Pos } from './pdfpos'
 import { useStore } from './store'
 
@@ -80,6 +80,16 @@ async function draw(pdf: PDFDocumentProxy, index: number, scale: number, canvas:
   await page.render({ canvas, viewport: vp }).promise
 }
 
+function savedPos(key: string): Pos {
+  try {
+    const p = JSON.parse(sessionStorage.getItem(key) ?? '')
+    if (Number.isInteger(p.page) && p.page >= 0 && typeof p.frac === 'number') return { page: p.page, frac: p.frac }
+  } catch {
+    // nothing saved
+  }
+  return { page: 0, frac: 0 }
+}
+
 type Props = {
   root: string
   path: string
@@ -110,7 +120,11 @@ export function PdfView({ root, path, target, onSource }: Props) {
   const [err, setErr] = useState('')
   const [page, setPage] = useState(0)
   const box = useRef<HTMLDivElement>(null)
-  const pos = useRef<Pos>({ page: 0, frac: 0 })
+  // The reader's spot outlives the view: a page reload (a new build reloads
+  // the page once it is hidden) or a switch of project remounts it, and it
+  // opened again on page 1.
+  const spotKey = 'pdfpos:' + root + '|' + path
+  const pos = useRef<Pos>(savedPos(spotKey))
   const restore = useRef(true)
   const loading = useRef(false)
   const docRef = useRef<Doc | null>(null)
@@ -321,6 +335,11 @@ export function PdfView({ root, path, target, onSource }: Props) {
     if (!el.clientHeight) return // hidden; the scroll to 0 is not the reader's
     pos.current = posAt(heights, el.scrollTop + el.clientHeight / 2)
     setPage(pos.current.page)
+    try {
+      sessionStorage.setItem(spotKey, JSON.stringify(pos.current))
+    } catch {
+      // storage full or off: the spot lasts as long as the view
+    }
   }
 
   const zoomBy = (f: number) => {
@@ -340,6 +359,12 @@ export function PdfView({ root, path, target, onSource }: Props) {
 
   // A recompile moves the text; its matches are looked for again on Enter.
   useEffect(() => setHits(null), [doc])
+  // A switch flipped after a search runs it again with the new rule.
+  const [findOpts, setFindOpts] = useState<FindOpts>({})
+  const searched = useRef(false)
+  useEffect(() => {
+    if (searched.current) findNext(false)
+  }, [findOpts])
 
   const openFind = () => {
     setFinding(true)
@@ -348,14 +373,16 @@ export function PdfView({ root, path, target, onSource }: Props) {
   const closeFind = () => {
     setFinding(false)
     setHits(null)
+    searched.current = false
   }
   const show = (list: Hit[], i: number) => {
     setCur(i)
     if (list[i]) scrollTo(list[i].page - 1, list[i].y)
   }
   // Enter looks for the query on every page (each page's text is read once
-  // per version) and shows the first match from the page being read; Enter
-  // again goes to the next, Shift+Enter to the one before.
+  // per version) and shows the first match from the top of the view down;
+  // Shift+Enter, the first from its bottom up. Again goes on in that
+  // direction, round the end of the document.
   const findNext = async (back: boolean) => {
     const want = foldQuery(q)
     if (!doc || !want || searching.current) return
@@ -364,17 +391,35 @@ export function PdfView({ root, path, target, onSource }: Props) {
       return
     }
     searching.current = true
+    searched.current = true
     try {
       if (texts.current?.key !== doc.key) texts.current = { key: doc.key, pages: new Map() }
       const cache = texts.current.pages
       const list: Hit[] = []
       for (let i = 0; i < doc.sizes.length; i++) {
         if (!cache.has(i)) cache.set(i, pageText(await runsOf(doc.pdf, i)))
-        list.push(...find(cache.get(i)!, want, i + 1))
+        list.push(...find(cache.get(i)!, want, i + 1, findOpts))
       }
       setHits(list)
-      const from = list.findIndex((h) => h.page - 1 >= pos.current.page)
-      show(list, from < 0 ? 0 : from)
+      // Spots as page + fraction of it, the view's edges as the same.
+      const at = (h: Hit) => h.page - 1 + h.y / doc.sizes[h.page - 1].h
+      const el = box.current
+      const edge = (y: number) => {
+        const p = posAt(heights, y)
+        return p.page + p.frac
+      }
+      let from: number
+      if (!el) from = 0
+      else if (back) {
+        const bottom = edge(el.scrollTop + el.clientHeight)
+        from = list.findLastIndex((h) => at(h) <= bottom)
+        if (from < 0) from = list.length - 1
+      } else {
+        const top = edge(el.scrollTop)
+        from = list.findIndex((h) => at(h) >= top)
+        if (from < 0) from = 0
+      }
+      show(list, from)
     } catch {
       setHits([])
     } finally {
@@ -431,6 +476,11 @@ export function PdfView({ root, path, target, onSource }: Props) {
           onQuery={(v) => {
             setQ(v)
             setHits(null)
+          }}
+          opts={findOpts}
+          onOpts={(o) => {
+            setHits(null)
+            setFindOpts(o)
           }}
           total={hits ? hits.length : null}
           cur={cur}

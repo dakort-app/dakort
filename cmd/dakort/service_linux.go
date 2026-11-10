@@ -58,6 +58,10 @@ func (s systemdService) definition() string {
 	for _, a := range append(append([]string{s.exe()}, s.o.serverArgs()...), "-log", s.log()) {
 		args = append(args, unitQuote(a))
 	}
+	// ExecStart is a command line and Environment a list of assignments, so
+	// words with spaces are quoted there; WorkingDirectory is one path,
+	// taken as written, and quotes would make it "not absolute" (seen on
+	// a folder with a space in its name: the unit failed to load).
 	return `# Written by dakort setup.
 [Unit]
 Description=Dakort: Claude Code and Codex on your phone
@@ -66,7 +70,7 @@ After=network-online.target
 [Service]
 ExecStart=` + strings.Join(args, " ") + `
 Environment=` + unitQuote("PATH="+servicePATH()) + `
-WorkingDirectory=` + unitQuote(s.o.home) + `
+WorkingDirectory=` + s.o.home + `
 Restart=always
 RestartSec=1
 
@@ -101,6 +105,7 @@ func (s systemdService) install() error {
 	if s.installed() {
 		systemctl("stop", s.o.name)
 	}
+	stopDetached(s.exe())
 	if exists(s.staged()) {
 		if err := os.Rename(s.staged(), s.exe()); err != nil {
 			return err
@@ -112,10 +117,8 @@ func (s systemdService) install() error {
 	if err := systemctl("daemon-reload"); err != nil {
 		return err
 	}
+	// The unit was stopped above, so --now starts it with the new file.
 	if err := systemctl("enable", "--now", s.o.name); err != nil {
-		return err
-	}
-	if err := systemctl("restart", s.o.name); err != nil {
 		return err
 	}
 	// Lingering keeps the user's services running with nobody logged in,
@@ -129,7 +132,12 @@ func (s systemdService) install() error {
 	return nil
 }
 
+func (s systemdService) startDirect() error {
+	return startDetached(s.exe(), s.o.serverArgs(), s.o.home, s.log())
+}
+
 func (s systemdService) remove() error {
+	stopDetached(s.exe())
 	if !s.installed() {
 		return nil
 	}

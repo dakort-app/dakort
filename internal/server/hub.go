@@ -126,16 +126,16 @@ type sub struct{ ch chan event }
 type hub struct {
 	epoch string // ids from an earlier server run never match
 
-	mu    sync.Mutex
-	seq   uint64
-	ring  []event
-	subs  map[*sub]struct{}
-	live  map[string]*LiveTurn    // by session
-	tasks map[string][]agent.Task // by session; outlives the turns
-	queue map[string][]Queued     // by session
-	left  map[string][]procs.Info // by session
-	build string                  // the server's version, in every snapshot: a page from an older build reloads itself
-	latest string                 // a newer release's tag, once found (release.go), in every snapshot
+	mu     sync.Mutex
+	seq    uint64
+	ring   []event
+	subs   map[*sub]struct{}
+	live   map[string]*LiveTurn    // by session
+	tasks  map[string][]agent.Task // by session; outlives the turns
+	queue  map[string][]Queued     // by session
+	left   map[string][]procs.Info // by session
+	build  string                  // the server's version, in every snapshot: a page from an older build reloads itself
+	latest string                  // a newer release's tag, once found (release.go), in every snapshot
 }
 
 func newHub() *hub {

@@ -69,7 +69,7 @@ export function OpenFolder(props: { onClose: () => void }) {
 type Listing = { path: string; parent?: string; dirs: string[]; changed?: Record<string, string> }
 
 // How Browse sorts, remembered on this device.
-const sortKey = 'made.browseSort'
+const sortKey = 'dakort.browseSort'
 
 // Browse walks the disk one folder at a time from the home folder, or from
 // a path pasted in (the quick way on a phone).

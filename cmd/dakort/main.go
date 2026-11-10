@@ -245,14 +245,19 @@ func private(addr string) error {
 	return errors.New("not a loopback or Tailscale address; use -expose to listen there on purpose")
 }
 
-// listenTailnet waits for Tailscale to be up, then serves on this
-// machine's Tailscale addresses at port, and does so again if Tailscale
-// goes away and comes back. Addresses already listened on are skipped.
+// listenTailnet waits for Tailscale to be installed and up, then serves on
+// this machine's Tailscale addresses at port, and does so again if
+// Tailscale goes away and comes back. Addresses already listened on are
+// skipped. Installed later (after dakort setup, as the setup output
+// suggests) it is found at its usual place within relisten, no restart.
 func listenTailnet(srv *http.Server, port string, taken []string) {
 	bin, err := tailscaleBin()
-	if err != nil {
-		log.Printf("no Tailscale here: listening on this machine only (install Tailscale to reach it from a phone)")
-		return
+	for told := false; err != nil; bin, err = tailscaleBin() {
+		if !told {
+			log.Printf("no Tailscale here: listening on this machine only until it is installed (install Tailscale to reach it from a phone)")
+			told = true
+		}
+		time.Sleep(relisten)
 	}
 	for warned := false; ; time.Sleep(relisten) {
 		name, ips, err := tailscaleSelf(bin)

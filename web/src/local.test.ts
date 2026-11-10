@@ -29,13 +29,13 @@ describe('folder renames', () => {
   it('carries tabs, a new session draft and the last folder over', () => {
     saveTabs('C:\\w\\proj a', { ids: ['s1'], active: 's1' })
     saveTabs('C:\\w\\proj a-x', { ids: ['s2'], active: 's2' })
-    store.set('made.draft:new:C:\\w\\proj a', 'half a thought')
+    store.set('dakort.draft:new:C:\\w\\proj a', 'half a thought')
     setLastFolder('C:\\w\\proj a')
     followMoves(moves)
     expect(loadTabs('C:\\w\\proj b')).toEqual({ ids: ['s1'], active: 's1' })
     expect(loadTabs('C:\\w\\proj a')).toEqual({ ids: [], active: '' })
     expect(loadTabs('C:\\w\\proj a-x').ids).toEqual(['s2'])
-    expect(store.get('made.draft:new:C:\\w\\proj b')).toBe('half a thought')
+    expect(store.get('dakort.draft:new:C:\\w\\proj b')).toBe('half a thought')
     expect(lastFolder()).toBe('C:\\w\\proj b')
   })
 })
@@ -172,7 +172,7 @@ describe('folders', () => {
   })
 
   it('keep their tabs under both spellings, and find ones saved before', () => {
-    store.set('made.tabs:C:\\A\\old', JSON.stringify({ ids: ['o'], active: 'o' }))
+    store.set('dakort.tabs:C:\\A\\old', JSON.stringify({ ids: ['o'], active: 'o' }))
     expect(loadTabs('C:\\A\\old').ids).toEqual(['o'])
     saveTabs('c:\\A\\new', { ids: ['n'], active: 'n' })
     expect(loadTabs('C:\\A\\NEW').ids).toEqual(['n'])
@@ -217,5 +217,15 @@ describe('finishedIn', () => {
     expect(finishedIn(['a', 'b', 'c'], sessions, 'C:/w/dakort')).toBe(1)
     expect(finishedIn(['a', 'b', 'c'], sessions, 'C:/w/other')).toBe(0)
     expect(finishedIn(['a', 'b', 'c'], sessions, '')).toBe(3)
+  })
+})
+
+describe('resumeCommand', () => {
+  it('goes to the folder, then resumes by id with the session own CLI', async () => {
+    const { resumeCommand } = await import('./local')
+    expect(resumeCommand({ id: 'abc', provider: 'claude', cwd: 'C:\\w\\proj a' })).toBe("cd 'C:\\w\\proj a'; claude --resume abc")
+    expect(resumeCommand({ id: 'def', provider: 'codex', cwd: '/home/sam/x' })).toBe("cd '/home/sam/x'; codex resume def")
+    expect(resumeCommand({ id: 'ghi', provider: 'claude', cwd: "C:\\w\\sam's" })).toBe('cd "C:\\w\\sam\'s"; claude --resume ghi')
+    expect(resumeCommand({ id: 'jkl', provider: 'claude', cwd: '' })).toBe('claude --resume jkl')
   })
 })

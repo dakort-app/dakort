@@ -5,7 +5,9 @@
 # as ten and a Windows one as two against the free allowance (run by hand
 # from Actions, Run workflow, for all three). The tests that spawn the
 # real CLIs need a signed-in Claude, so they run on a person's machine,
-# not here.
+# not here. The service job installs a throwaway service for real on each
+# system (launchd, systemd, a scheduled task): the service part needs no
+# CLI, and the macOS one has no other machine to run on.
 name: ci
 on:
   push:
@@ -34,6 +36,44 @@ jobs:
           go-version-file: go.mod
       - run: go vet ./...
       - run: go test -short ./...
+
+  service:
+    if: github.repository == 'dakort-app/dakort' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: web
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # The runner's user has no systemd user manager until it lingers.
+      - if: runner.os == 'Linux'
+        run: |
+          sudo loginctl enable-linger "$(id -un)"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+      - if: runner.os == 'Linux'
+        run: systemctl --user is-system-running --wait || systemctl --user status --no-pager | head -20
+      # The script lives here, not in scripts/, because scripts/ is
+      # export-ignored and never reaches the public repo (found 2026-11-10,
+      # when the first public run after v0.1.0 failed with "No such file").
+      # Run through bash: the public tree is made on Windows, where git
+      # records no executable bit, and the next run failed with
+      # "Permission denied".
+      - if: runner.os != 'Windows'
+        run: bash .github/service-check.sh
+      - if: runner.os == 'Windows'
+        run: go test -run TestRealSetup -v ./cmd/dakort
 
   web:
     runs-on: ubuntu-latest

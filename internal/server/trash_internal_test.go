@@ -54,10 +54,10 @@ func TestSettingsMemory(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "sessions.json")
 	r1 := newRunner(newHub(), nil, "", "", 1, func() {})
 	r1.loadSettings(file)
-	r1.settings("a", sendRequest{Model: "haiku", Effort: "high", PermissionMode: "plan", Ultracode: &yes})
+	r1.settings("a", sendRequest{Model: "haiku", Effort: "high", PermissionMode: "plan", Ultracode: &yes, Chrome: &yes})
 	r2 := newRunner(newHub(), nil, "", "", 1, func() {})
 	r2.loadSettings(file)
-	if got := r2.settingsOf("a"); got != (sessionSettings{model: "haiku", effort: "high", permissionMode: "plan", ultracode: true}) {
+	if got := r2.settingsOf("a"); got != (sessionSettings{model: "haiku", effort: "high", permissionMode: "plan", ultracode: true, chrome: true}) {
 		t.Errorf("after a restart: %+v", got)
 	}
 }

@@ -27,7 +27,7 @@ func TestSnapshotNamesBuild(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+"/api/events", nil)
-	req.AddCookie(&http.Cookie{Name: "made_token", Value: token})
+	req.AddCookie(&http.Cookie{Name: "dakort_token", Value: token})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

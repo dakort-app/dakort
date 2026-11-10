@@ -6,16 +6,22 @@ import (
 	"encoding/hex"
 	"errors"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-// One user, one secret. The token is made on first run and kept in a file
-// only the user can read; visiting /login?token=T once per device sets a
-// long-lived cookie holding it.
-const cookieName = "made_token"
+// One user, one secret. The token is created on first run and kept in a
+// file only the user can read; visiting /login?token=T once per device
+// sets a long-lived cookie holding it.
+const cookieName = "dakort_token"
+
+// The cookie's name before the project was renamed (2026-11-09). A
+// device still carrying it is let in once and given the new one, so the
+// rename logs nobody out. Remove after a release or two.
+const oldCookieName = "made_token"
 
 // LoadToken reads the token at path, creating it on first run.
 func LoadToken(path string) (string, error) {
@@ -84,6 +90,19 @@ func (s *Server) cookie(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		if c, err := r.Cookie(oldCookieName); err == nil && s.validToken(c.Value) {
+			s.setCookie(w)
+			http.SetCookie(w, &http.Cookie{Name: oldCookieName, Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Refused: say what the device sent (cookie names only, never
+		// values), so a login prompt nobody expected can be explained.
+		var names []string
+		for _, c := range r.Cookies() {
+			names = append(names, c.Name)
+		}
+		log.Printf("not logged in: %s %s from %s; cookies %v; %s", r.Method, r.URL.Path, r.RemoteAddr, names, r.UserAgent())
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			http.Error(w, "not logged in", http.StatusUnauthorized)
 			return

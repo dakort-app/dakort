@@ -22,6 +22,8 @@
   --chip-on: #ebe8e2;
   --knob-off: #cfcbc4;
   --pdf-around: #e6e3dd;
+  --scroll-thumb: #cbc6bd;
+  --scroll-thumb-hover: #a9a49b;
   color-scheme: light;
   --run: var(--accent); /* working: the accent, pulsing (.dot.run) */
   --ok: #2ea043;
@@ -56,6 +58,8 @@
   --chip-on: #34322e;
   --knob-off: #57534c;
   --pdf-around: #2a2926;
+  --scroll-thumb: #4a4743;
+  --scroll-thumb-hover: #66625b;
   --ok: #3fb950;
   --warn: #d29922;
   --err: #f2665e;
@@ -64,6 +68,13 @@
 
 * {
   box-sizing: border-box;
+  /* Slim scrollbars in the theme's colours, without arrows, in place of
+     Windows' wide grey ones (macOS shows its own overlay bars anyway). */
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+*:hover {
+  scrollbar-color: var(--scroll-thumb-hover) transparent;
 }
 html,
 body {
@@ -146,6 +157,14 @@ textarea {
   padding: 5px 12px;
   cursor: pointer;
 }
+/* A link styled as a button (Save is a download link) looks like the
+   buttons beside it, not like a blue underlined link. */
+a.btn {
+  display: inline-block;
+  color: inherit;
+  text-decoration: none;
+  line-height: normal;
+}
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
@@ -190,6 +209,12 @@ textarea {
 }
 .dot.unread {
   background: var(--accent);
+}
+/* Background tasks only (agents, commands): a still ring, apart from the
+   pulse of a turn, as a prompt is taken at once. */
+.dot.tasks {
+  box-sizing: border-box;
+  border: 2px solid var(--run);
 }
 @keyframes pulse {
   50% {
@@ -486,8 +511,12 @@ html.tab-dragging * {
   border-radius: 5px;
   cursor: pointer;
 }
-.tab-menu button:hover {
+.tab-menu button:hover:not(:disabled) {
   background: var(--line);
+}
+.tab-menu button:disabled {
+  color: var(--faint, #999);
+  cursor: default;
 }
 /* Icons before tab titles and file names: file types in their own
    colours, the agents' marks in Claude's orange. */
@@ -1196,6 +1225,12 @@ html.tab-dragging * {
 .tree-row .folder-icon {
   margin-right: 4px;
 }
+.chip-chrome {
+  display: inline-flex;
+  margin-left: 6px;
+  vertical-align: middle;
+  color: var(--run);
+}
 .ultra-dot {
   display: inline-block;
   width: 6px;
@@ -1457,6 +1492,29 @@ html.tab-dragging * {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* The bar in a folded long prompt (a big paste): what is hidden, and a
+   tap opens it. Open, the same bar folds it again. */
+.fold-bar {
+  display: block;
+  width: 100%;
+  margin: 6px 0;
+  padding: 4px 8px;
+  border: 1px dashed var(--accent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  text-align: center;
+  white-space: normal;
+  cursor: pointer;
+}
+.fold-bar:hover {
+  background: var(--accent-soft);
+}
+.fold-bar.less {
+  margin-bottom: 0;
+}
 .reply {
   padding: 0 2px;
   overflow-wrap: anywhere;
@@ -1549,6 +1607,16 @@ html.tab-dragging * {
 .thinking.open {
   display: block;
   cursor: default;
+}
+.thinking.md-thinking {
+  white-space: normal;
+  cursor: pointer;
+}
+.thinking.md-thinking .md > :first-child {
+  margin-top: 0;
+}
+.thinking.md-thinking .md > :last-child {
+  margin-bottom: 0;
 }
 .tool {
   margin: 3px 0;
@@ -1719,8 +1787,109 @@ html.tab-dragging * {
   padding: 12px;
   text-align: center;
 }
-.file-image img {
+.file-image img,
+.file-image video {
   max-width: 100%;
+  max-height: 100%;
+}
+.file-image audio {
+  width: min(100%, 520px);
+  margin-top: 24px;
+}
+/* CSV and TSV: a table with the header and the row numbers held in place
+   while the rest scrolls. Fixed row height: CsvView draws only the rows
+   in view and counts on it. */
+.file-csv {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.csv-box {
+  flex: 1;
+  overflow: auto;
+}
+.csv-table {
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font: 13px/1 var(--mono);
+}
+.csv-table th,
+.csv-table td {
+  height: 26px;
+  padding: 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.csv-table .num {
+  text-align: right;
+}
+.csv-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--side);
+  font-weight: 600;
+}
+.csv-table .rn {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--side);
+  color: var(--faint);
+  text-align: right;
+}
+.csv-table thead .rn {
+  z-index: 3;
+}
+.csv-table tbody tr:hover td {
+  background: var(--tint-current);
+}
+.csv-foot {
+  padding: 4px 12px;
+  border-top: 1px solid var(--line);
+}
+.office-note {
+  max-width: 440px; /* centred by .center */
+}
+/* Archives: a tree like the explorer's, with size and date columns. */
+.archive-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding-right: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.archive-row.dir {
+  cursor: pointer;
+}
+.archive-row:hover {
+  background: var(--tint-current);
+}
+.archive-twisty {
+  width: 10px;
+  flex: none;
+}
+.archive-size {
+  width: 72px;
+  flex: none;
+  text-align: right;
+}
+.archive-date {
+  width: 96px;
+  flex: none;
+  text-align: right;
+}
+@media (max-width: 600px) {
+  .archive-date {
+    display: none;
+  }
 }
 /* Word documents: docx-preview's pages on the same grey as a PDF's. */
 .file-docx {
@@ -1834,6 +2003,16 @@ html.tab-dragging * {
   min-width: 0;
   margin: 0;
   padding: 4px 8px;
+}
+/* Find's switches: Aa (match case) and ab, underlined, for whole words. */
+.find-opt {
+  min-width: 30px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+.find-opt.word {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .pdf-hit {
   position: absolute;
@@ -2018,6 +2197,16 @@ html.tab-dragging * {
 .md td {
   border: 1px solid var(--line);
   padding: 3px 8px;
+}
+/* mdrender.ts marks the columns: short ones whole, long ones wrapping
+   but never cut down to a word a line. */
+.md th.short,
+.md td.short {
+  white-space: nowrap;
+}
+.md th.long,
+.md td.long {
+  min-width: 14em;
 }
 .md a {
   color: var(--accent);

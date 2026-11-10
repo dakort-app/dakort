@@ -198,7 +198,7 @@ func (s *Server) renameCodex(ctx context.Context, id, cwd, title string) error {
 }
 
 // sessionSettings switches a session's idle compaction {idleCompact}, and
-// keeps an effort or Ultracode picked in the menu {effort, ultracode} at
+// keeps an effort, Ultracode or Chrome picked in the menu {effort, ultracode, chrome} at
 // once, without a turn: a pick used to live in the page until the next
 // send, so a tab switch or a reload lost it (a contributor's branch, 5221579). The
 // next turn's CLI gets it; effort "default" clears it.
@@ -207,6 +207,7 @@ func (s *Server) sessionSettings(w http.ResponseWriter, r *http.Request) {
 		IdleCompact *bool  `json:"idleCompact"`
 		Effort      string `json:"effort"`
 		Ultracode   *bool  `json:"ultracode"`
+		Chrome      *bool  `json:"chrome"`
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -219,10 +220,10 @@ func (s *Server) sessionSettings(w http.ResponseWriter, r *http.Request) {
 	if req.IdleCompact != nil {
 		s.runner.setIdleCompact(id, *req.IdleCompact)
 	}
-	if req.Effort != "" || req.Ultracode != nil {
-		s.runner.settings(id, sendRequest{Effort: req.Effort, Ultracode: req.Ultracode})
+	if req.Effort != "" || req.Ultracode != nil || req.Chrome != nil {
+		s.runner.settings(id, sendRequest{Effort: req.Effort, Ultracode: req.Ultracode, Chrome: req.Chrome})
 	}
-	if req.IdleCompact != nil || req.Effort != "" || req.Ultracode != nil {
+	if req.IdleCompact != nil || req.Effort != "" || req.Ultracode != nil || req.Chrome != nil {
 		s.hub.publish(Ev{Type: "sessions"}) // other devices show it
 	}
 	writeJSON(w, map[string]bool{"ok": true})

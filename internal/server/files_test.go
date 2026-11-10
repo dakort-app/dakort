@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -48,6 +49,41 @@ func fileURL(base, kind, root, path string) string {
 	return base + "/api/files/" + kind + "?root=" + url.QueryEscape(root) + "&path=" + url.QueryEscape(path)
 }
 
+// Audio and video answer byte ranges (Safari plays nothing without them),
+// under the same sandbox; an SVG comes as a picture.
+func TestFilesMedia(t *testing.T) {
+	base, root, _ := fileFixture(t)
+	clip := make([]byte, 1000)
+	for i := range clip {
+		clip[i] = byte(i)
+	}
+	os.WriteFile(filepath.Join(root, "clip.mp4"), clip, 0o644)
+	os.WriteFile(filepath.Join(root, "pic.svg"), []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`), 0o644)
+
+	req, _ := http.NewRequest("GET", fileURL(base, "raw", root, "clip.mp4"), nil)
+	req.AddCookie(&http.Cookie{Name: "dakort_token", Value: token})
+	req.Header.Set("Range", "bytes=10-19")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	h := resp.Header
+	if resp.StatusCode != 206 || h.Get("Content-Range") != "bytes 10-19/1000" || len(body) != 10 || body[0] != 10 ||
+		h.Get("Content-Type") != "video/mp4" || h.Get("Content-Security-Policy") != "sandbox" {
+		t.Errorf("range: %d %q %q len=%d csp=%q", resp.StatusCode, h.Get("Content-Range"), h.Get("Content-Type"), len(body), h.Get("Content-Security-Policy"))
+	}
+	if resp, body := fetch(t, fileURL(base, "raw", root, "clip.mp4"), token); resp.StatusCode != 200 || len(body) != 1000 {
+		t.Errorf("whole clip: %d len=%d", resp.StatusCode, len(body))
+	}
+
+	resp, _ = fetch(t, fileURL(base, "raw", root, "pic.svg"), token)
+	if resp.Header.Get("Content-Type") != "image/svg+xml" || resp.Header.Get("Content-Security-Policy") != "sandbox" {
+		t.Errorf("svg: %q csp=%q", resp.Header.Get("Content-Type"), resp.Header.Get("Content-Security-Policy"))
+	}
+}
+
 func TestFilesServe(t *testing.T) {
 	base, root, _ := fileFixture(t)
 
@@ -88,6 +124,34 @@ func TestFilesServe(t *testing.T) {
 		}
 	}
 
+	// An HTML file asked for as a page comes as one, still sandboxed; other
+	// files ignore the ask.
+	for path, want := range map[string]string{"page.html": "text/html; charset=utf-8", "notes.md": "application/octet-stream"} {
+		resp, _ := fetch(t, fileURL(base, "raw", root, path)+"&html=1", token)
+		if resp.Header.Get("Content-Type") != want || resp.Header.Get("Content-Security-Policy") != "sandbox" {
+			t.Errorf("%s as a page: %q csp=%q", path, resp.Header.Get("Content-Type"), resp.Header.Get("Content-Security-Policy"))
+		}
+	}
+	// Opening on the computer: HTML and office documents only (nothing that
+	// runs, not even a macro workbook), and never for a request from another
+	// device. (A real open would put a window on the screen, so only the
+	// refusals are tried.)
+	for _, n := range []string{"tool.exe", "run.bat", "book.xlsm"} {
+		os.WriteFile(filepath.Join(root, n), []byte("x"), 0o644)
+	}
+	for _, n := range []string{"notes.md", "tool.exe", "run.bat", "book.xlsm"} {
+		if code, _ := post(t, fileURL(base, "open", root, n), map[string]any{}); code != 400 {
+			t.Errorf("open %s: %d, want 400", n, code)
+		}
+	}
+	req, _ := http.NewRequest("POST", fileURL(base, "open", root, "page.html"), strings.NewReader("{}"))
+	req.AddCookie(&http.Cookie{Name: "dakort_token", Value: token})
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	req.Host = "laptop.example.ts.net"
+	if r, err := http.DefaultClient.Do(req); err != nil || r.StatusCode != 403 {
+		t.Errorf("open from another device: %v %v, want 403", err, r)
+	}
+
 	// A PDF still being written is refused, not served truncated.
 	if resp, _ := fetch(t, fileURL(base, "raw", root, "half.pdf"), token); resp.StatusCode != 503 {
 		t.Errorf("half-written PDF: %d, want 503", resp.StatusCode)
@@ -102,8 +166,8 @@ func TestFilesServe(t *testing.T) {
 	}
 	// ETag round trip.
 	resp, _ = fetch(t, fileURL(base, "raw", root, "done.pdf"), token)
-	req, _ := http.NewRequest("GET", fileURL(base, "raw", root, "done.pdf"), nil)
-	req.AddCookie(&http.Cookie{Name: "made_token", Value: token})
+	req, _ = http.NewRequest("GET", fileURL(base, "raw", root, "done.pdf"), nil)
+	req.AddCookie(&http.Cookie{Name: "dakort_token", Value: token})
 	req.Header.Set("If-None-Match", resp.Header.Get("ETag"))
 	if r2, err := http.DefaultClient.Do(req); err != nil || r2.StatusCode != 304 {
 		t.Errorf("If-None-Match: %v %v", err, r2)

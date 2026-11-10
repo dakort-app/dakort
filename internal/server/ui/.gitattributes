@@ -1,0 +1,4 @@
+# Everything here is built from web/ by `npm run build` and embedded in the
+# binary. Marked generated so GitHub's language bar counts the Go and the
+# TypeScript in web/src, not the bundles.
+* linguist-generated

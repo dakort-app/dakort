@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { loadConfig, useConfig, type ClaudeModel, type Config } from './config'
+import { GlobeIcon } from './icons'
 
-// The model, effort and Ultracode for a session, chosen from a panel above
+// The model, effort, Ultracode and Chrome for a session, chosen from a panel above
 // the composer, after the VS Code extension's picker. Empty means the
 // CLI's own default (from the user's Claude settings, or Codex's config).
 // A Codex session lists the models Codex offers the account instead, and
-// has no Ultracode.
+// has no Ultracode or Chrome.
 
-export type Choice = { model: string; effort: string; ultracode: boolean }
+export type Choice = { model: string; effort: string; ultracode: boolean; chrome: boolean }
 
 // The Claude list comes from the CLI's own answer (GET /api/config); this
 // one stands in until it arrives, and when the CLI cannot be asked.
@@ -65,6 +66,11 @@ export function ModelPicker({ value, onChange, provider }: { value: Choice; onCh
       <button className="chip-btn" onClick={() => setOpen(!open)} aria-haspopup="listbox" aria-expanded={open}>
         {chip}
         {value.ultracode && !codex && <span className="ultra-dot" title="Ultracode on" />}
+        {value.chrome && !codex && (
+          <span className="chip-chrome" title="Chrome on">
+            <GlobeIcon />
+          </span>
+        )}
       </button>
       {open && (
         <div className="picker-panel" role="listbox">
@@ -116,6 +122,15 @@ export function ModelPicker({ value, onChange, provider }: { value: Choice; onCh
                 Ultracode <span className="faint small">multi-agent workflows</span>
               </div>
               <span className={'switch' + (value.ultracode ? ' on' : '')} role="switch" aria-checked={value.ultracode} />
+            </div>
+          )}
+          {/* Off by default: its 18 tools cost context on every turn. */}
+          {!codex && (
+            <div className="picker-row static" onClick={() => onChange({ ...value, chrome: !value.chrome })}>
+              <div className="grow">
+                Chrome <span className="faint small">drive your Chrome through the Claude extension</span>
+              </div>
+              <span className={'switch' + (value.chrome ? ' on' : '')} role="switch" aria-checked={value.chrome} aria-label="Chrome" />
             </div>
           )}
         </div>

@@ -1,6 +1,8 @@
 import { Fragment, useRef, useState, type ReactNode } from 'react'
 import { api, HTTPError, postJSON } from './api'
 import { StreamDot } from './Home'
+import { MoonIcon, PlusIcon, SunIcon } from './icons'
+import { busy, tasksTitle } from './live'
 import { followMoves, isUnread, sameFolder } from './local'
 import { OpenFolder } from './OpenFolder'
 import { baseName, folderHash } from './route'
@@ -19,7 +21,7 @@ import type { Folder, LeftoverRef } from './types'
 // Rows the explorer's list shows before "+N more": the current folder and
 // the most recently active others.
 const maxRows = 3
-const foldedKey = 'made.foldersFolded'
+const foldedKey = 'dakort.foldersFolded'
 
 function useFolders(current: string) {
   const folders = useStore((s) => s.folders)
@@ -34,11 +36,12 @@ function useFolders(current: string) {
     const mine = sessions.filter((s) => sameFolder(s.folder, f.path))
     if (mine.some((s) => live.turns[s.id])) return 'run'
     if (f.path !== current && mine.some(isUnread)) return 'unread'
+    if (mine.some((s) => busy(live, s.id))) return 'tasks'
     return ''
   }
   const dot = (f: Folder) => {
     const st = state(f)
-    return st ? <span className={'dot ' + st} title={st === 'run' ? 'working' : 'finished, not seen'} /> : <span className="dot" />
+    return st ? <span className={'dot ' + st} title={titles[st as Activity]} /> : <span className="dot" />
   }
   const go = (f: Folder) => {
     if (f.path !== current) location.hash = folderHash(f.path)
@@ -187,15 +190,20 @@ export function FolderList({ current, hide }: { current: string; hide?: ReactNod
   // sight; the rows themselves stay in name order.
   // A "1 more" row would take the space of the folder it hides, so fold
   // only when at least two would be hidden.
+  // A folder with a turn or background tasks running always shows, so its
+  // dot does not hide behind "N more" (where a still dot read as finished
+  // work).
   let shown = open
   if (!all && open.length > maxRows + 1) {
+    const working = (f: Folder) => f.path !== current && (state(f) === 'run' || state(f) === 'tasks')
     const recent = open
-      .filter((f) => f.path !== current)
+      .filter((f) => f.path !== current && !working(f))
       .sort((a, b) => (b.updated ?? '').localeCompare(a.updated ?? ''))
-      .slice(0, maxRows - 1)
-    shown = open.filter((f) => f.path === current || recent.includes(f))
+      .slice(0, Math.max(0, maxRows - 1 - open.filter(working).length))
+    shown = open.filter((f) => f.path === current || working(f) || recent.includes(f))
   }
   const hidden = open.filter((f) => !shown.includes(f))
+  const elsewhere = others(open, current, state)
 
   return (
     <div className="folder-list">
@@ -204,12 +212,12 @@ export function FolderList({ current, hide }: { current: string; hide?: ReactNod
           <span className="small faint explorer-title">PROJECTS</span>
           <span className="faint">{folded ? '▸' : '▾'}</span>
         </button>
-        {folded && open.some((f) => f.path !== current && state(f)) && <span className="dot unread" title="activity in another project" />}
+        {folded && elsewhere && <ActivityDot st={elsewhere} />}
         <span className="grow" />
         <ThemeButton />
         <StreamDot />
         <button className="icon" onClick={pick} aria-label="Open project" title="Open project">
-          +
+          <PlusIcon />
         </button>
         {hide}
       </div>
@@ -218,7 +226,7 @@ export function FolderList({ current, hide }: { current: string; hide?: ReactNod
           {shown.map((f) => row(f))}
           {hidden.length > 0 && (
             <div className="folder-row more" onClick={() => setAll(true)}>
-              {hidden.some((f) => state(f)) ? <span className="dot unread" /> : <span className="dot" />}
+              {hidden.some((f) => state(f)) ? <span className="dot unread" title="finished, not seen" /> : <span className="dot" />}
               {hidden.length} more…
             </div>
           )}
@@ -264,15 +272,32 @@ function ThemeButton() {
       aria-label={dark ? 'Switch to light' : 'Switch to dark'}
       title={dark ? 'Switch to light' : 'Switch to dark'}
     >
-      {dark ? '☼' /* ☀ shows as a colour emoji on some systems, even with VS15 */ : '☾'}
+      {dark ? <SunIcon /> : <MoonIcon />}
     </button>
   )
 }
 
-// otherActivity says whether another open folder has a turn running or
-// finished work not yet seen: with the explorer hidden, a dot on its
-// button says so.
-export function useOtherActivity(current: string): boolean {
+// What the other open folders are doing: 'run' when a turn runs in one
+// (it wins: it is what "is it still working?" asks), 'unread' when one
+// has finished work not yet seen, 'tasks' when only background tasks run
+// in one, else ''.
+type Activity = '' | 'run' | 'unread' | 'tasks'
+const titles: Record<Activity, string> = { '': '', run: 'working', unread: 'finished, not seen', tasks: tasksTitle }
+function others(open: Folder[], current: string, state: (f: Folder) => string): Activity {
+  const rest = open.filter((f) => f.path !== current).map(state)
+  return rest.includes('run') ? 'run' : rest.includes('unread') ? 'unread' : rest.includes('tasks') ? 'tasks' : ''
+}
+
+// The dot for the other folders, where they are out of sight: pulsing while
+// one works, a ring while only background tasks run, still once one has
+// finished.
+export function ActivityDot({ st }: { st: Activity }) {
+  if (!st) return null
+  return <span className={'dot ' + st} title={titles[st] + ' (another project)'} />
+}
+
+// With the explorer hidden, a dot on its button says the same.
+export function useOtherActivity(current: string): Activity {
   const { open, state } = useFolders(current)
-  return open.some((f) => f.path !== current && state(f) !== '')
+  return others(open, current, state)
 }

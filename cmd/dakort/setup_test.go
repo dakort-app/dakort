@@ -11,7 +11,8 @@ import (
 // The service's definition names the binary, the port and the data
 // folder, and on Windows is a CRLF batch file with the restart loop.
 func TestServiceDefinition(t *testing.T) {
-	o := setupOpts{port: 3005, home: filepath.Join(t.TempDir(), "madetest-home"), data: `C:\x y\data`, name: "DakortTest"}
+	// A space in the install folder, as in most user folders.
+	o := setupOpts{port: 3005, home: filepath.Join(t.TempDir(), "madetest home"), data: `C:\x y\data`, name: "DakortTest"}
 	svc := newService(o)
 	def := ""
 	switch s := svc.(type) {
@@ -31,6 +32,13 @@ func TestServiceDefinition(t *testing.T) {
 		}
 		if !strings.Contains(def, `"75"`) || !strings.Contains(def, svc.staged()) {
 			t.Error("the wrapper lacks the restart loop")
+		}
+	}
+	if runtime.GOOS == "linux" {
+		// systemd takes a path setting as written: quotes around a folder
+		// with a space made the unit fail to load.
+		if !strings.Contains(def, "\nWorkingDirectory="+o.home+"\n") {
+			t.Errorf("the unit's WorkingDirectory is not the bare path:\n%s", def)
 		}
 	}
 	if svc.unchanged() {

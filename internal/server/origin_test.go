@@ -25,7 +25,7 @@ func TestCrossSiteRefused(t *testing.T) {
 	post := func(headers ...string) int {
 		req := httptest.NewRequest("POST", "http://laptop.example.ts.net:3002/api/folders/close", strings.NewReader(`{"path":"C:/nowhere"}`))
 		req.Header.Set("Content-Type", "application/json")
-		req.AddCookie(&http.Cookie{Name: "made_token", Value: token})
+		req.AddCookie(&http.Cookie{Name: "dakort_token", Value: token})
 		for i := 0; i+1 < len(headers); i += 2 {
 			req.Header.Set(headers[i], headers[i+1])
 		}

@@ -7,7 +7,8 @@ const run = (str: string, x: number, line: number, eol = false): Run => ({ str, 
 describe('find in a PDF page', () => {
   it('ignores case, ligatures and runs of white space', () => {
     const pt = pageText([run('The ﬁrst   Needle', 0, 0, true), run('needle', 0, 1)])
-    expect(pt.text).toBe('the first needle needle')
+    expect(pt.text).toBe('The first Needle needle')
+    expect(pt.lower).toBe('the first needle needle')
     expect(find(pt, foldQuery('NEEDLE'), 1)).toHaveLength(2)
     expect(find(pt, foldQuery('first'), 1)).toHaveLength(1)
     expect(find(pt, foldQuery('  first\n needle '), 1)).toHaveLength(1)
@@ -28,6 +29,18 @@ describe('find in a PDF page', () => {
     const pt = pageText([run('one needle', 0, 0, true), run('here', 0, 1)])
     const [h] = find(pt, foldQuery('needle here'), 1)
     expect(h).toEqual({ page: 1, x: 40, y: 0, w: 60, h: 12 })
+  })
+
+  it('matches case when asked', () => {
+    const pt = pageText([run('Needle needle NEEDLE', 0, 0)])
+    expect(find(pt, 'needle', 1)).toHaveLength(3)
+    expect(find(pt, 'Needle', 1, { matchCase: true })).toEqual([{ page: 1, x: 0, y: 0, w: 60, h: 12 }])
+  })
+
+  it('matches whole words when asked', () => {
+    const pt = pageText([run('cat concat cat_x cat. (cat)', 0, 0)])
+    expect(find(pt, 'cat', 1)).toHaveLength(5)
+    expect(find(pt, 'cat', 1, { wholeWord: true }).map((h) => h.x)).toEqual([0, 170, 230])
   })
 
   it('finds nothing for an empty query', () => {

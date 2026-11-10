@@ -6,6 +6,8 @@ import { providerOf } from './local'
 import { copyText } from './clip'
 import { CheckIcon, CopyIcon } from './icons'
 import { Markdown } from './Markdown'
+import { PromptText } from './PromptText'
+import { latestTitle, titles } from './thinking'
 import { answer, group, promptText, resultText, toolSummary, type Item, type Part } from './rows'
 import { dropPending, onCatchUp, onCollapse, setCacheLife, setContext, setLastReply, setReplyModel, setRowWindow, useStore, type Pending } from './store'
 import type { Block, LiveBlock, Row } from './types'
@@ -317,7 +319,7 @@ export function Transcript({ id }: { id: string }) {
             {p.images.map((u) => (
               <Thumb key={u} src={u} />
             ))}
-            {p.text && <div className="prompt-text">{p.text}</div>}
+            {p.text && <PromptText text={p.text} />}
           </div>
         </div>
       ))}
@@ -329,7 +331,7 @@ export function Transcript({ id }: { id: string }) {
           {live.map((b, i) => (b.kind === 'thinking' ? null : <Markdown key={i} text={b.text} />))}
           {turn && (
             <div className="faint small working">
-              {turn.state === 'starting' ? `Starting ${codex ? 'Codex' : 'Claude'}…` : fresh.at(-1)?.kind === 'thinking' ? 'Thinking…' : 'Working…'}
+              {turn.state === 'starting' ? `Starting ${codex ? 'Codex' : 'Claude'}…` : fresh.at(-1)?.kind === 'thinking' ? `${latestTitle(fresh.at(-1)!.text) ?? 'Thinking'}…` : 'Working…'}
             </div>
           )}
         </div>
@@ -422,7 +424,7 @@ function ItemView({ item, prev, anchor }: { item: Item; prev?: Item; anchor: str
           {item.media.map((b, i) => (
             <Media key={i} block={b} />
           ))}
-          {item.text && <div className="prompt-text">{item.text}</div>}
+          {item.text && <PromptText text={item.text} />}
         </div>
       ) : item.kind === 'reply' ? (
         <div className="reply">
@@ -499,13 +501,21 @@ function PartView({ part }: { part: Part }) {
 
 // Thinking shows when it has text (recent CLIs record most of it empty;
 // those left a bare "Thought" line each, noise): a few lines in grey
-// italics, the rest a tap away.
+// italics, the rest a tap away. A summary made of titled steps (Codex's)
+// shows just the titles, and opens to the whole of it as markdown.
 function Thinking({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
+  const steps = useMemo(() => titles(text), [text])
   if (!text.trim()) return null
+  if (steps.length && open)
+    return (
+      <div className="thinking open md-thinking" onClick={() => setOpen(false)}>
+        <Markdown text={text} />
+      </div>
+    )
   return (
     <div className={'thinking' + (open ? ' open' : '')} onClick={() => setOpen(!open)} title={open ? '' : 'Show all'}>
-      {text}
+      {steps.length ? steps.join('\n') : text}
     </div>
   )
 }

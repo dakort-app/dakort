@@ -4,7 +4,7 @@
 // index.html sets it before the first paint so a dark page does not flash
 // light.
 
-const key = 'made.theme'
+const key = 'dakort.theme'
 const listeners = new Set<() => void>()
 
 export const isDark = () => localStorage.getItem(key) === 'dark'

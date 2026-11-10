@@ -1,0 +1,12 @@
+# What scripts/publish.sh leaves out of the public tree (git archive honours
+# export-ignore): the working notes, the plans and the scripts that name
+# this machine, the tailnet and the people on the project. This file
+# itself is exported, so the line below reaches the public repo.
+BRIEF.md export-ignore
+CLAUDE.md export-ignore
+RELEASE.md export-ignore
+scripts export-ignore
+
+# The built web app the binary embeds, so GitHub's language bar counts the
+# Go and the TypeScript in web/src, not the bundles and the PDF worker.
+internal/server/ui/** linguist-generated

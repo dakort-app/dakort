@@ -65,6 +65,37 @@ export const UnsplitIcon = () => (
   </svg>
 )
 
+// The theme switch shows what a tap gives: the moon in light, the sun in
+// dark. Drawn, not the ☾ and ☼ characters, which each font shapes its own
+// way (a thin crescent in Segoe UI) and none matched the icons beside them.
+export const MoonIcon = () => (
+  <svg {...base} aria-hidden="true">
+    <path d="M19.5 14.5A8 8 0 0 1 9.5 4.5a8 8 0 1 0 10 10z" />
+  </svg>
+)
+
+export const SunIcon = () => (
+  <svg {...base} aria-hidden="true">
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4" />
+  </svg>
+)
+
+// Open a project: a plus, the same weight as the icons beside it.
+export const PlusIcon = () => (
+  <svg {...base} aria-hidden="true">
+    <path d="M12 5v14M5 12h14" />
+  </svg>
+)
+
+// The browser: on the model chip while a session has Chrome on.
+export const GlobeIcon = () => (
+  <svg {...base} width={13} height={13} aria-hidden="true">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12h18M12 3c2.5 2.6 3.7 5.6 3.7 9s-1.2 6.4-3.7 9c-2.5-2.6-3.7-5.6-3.7-9S9.5 5.6 12 3z" />
+  </svg>
+)
+
 type Svg = { body: string; box: string }
 // The sets' SVG bodies come from the build (vite.config.ts), not from users.
 const Raw = ({ icon, size, className }: { icon: Svg; size: number; className: string }) => (

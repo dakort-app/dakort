@@ -143,8 +143,8 @@ HTTPS certificates enabled in your Tailscale admin console.
 
 Dakort updates itself. When a newer release has been out for an hour, the
 service fetches it, checks it against the release's checksums, and
-restarts with it once nothing is running. The line under the project list
-names the version you are on and says when a newer one is on its way.
+restarts with it once nothing is running. Nothing to press, nothing to
+read. The version you are on is at the foot of the Open project sheet.
 
 To keep that in your own hands, run `dakort setup -auto-update=false`
 once. Then, when the page says a release is out:

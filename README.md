@@ -3,7 +3,7 @@
 All your Claude Code and Codex projects in one light window, with the
 files beside the agent.
 
-![Two projects; a prompt; Claude adds a query parameter and a test while main.go updates beside the conversation; the same session on a phone](docs/dakort.gif)
+<img src="docs/dakort.gif" width="800" alt="Two projects; a prompt; Claude adds a query parameter and a test while main.go updates beside the conversation; the same session on a phone">
 
 Dakort is a small server on your own computer and a page in your browser.
 Each project is a browser tab.
@@ -253,7 +253,7 @@ Delete them by hand if you want nothing left.
 If you write LaTeX, the PDF opens beside the agent and re-renders as it
 recompiles, with SyncTeX both ways:
 
-![Claude fixes two typos in a .tex file and recompiles; the PDF beside it updates](docs/dakort-latex.gif)
+<img src="docs/dakort-latex.gif" width="800" alt="Claude fixes two typos in a .tex file and recompiles; the PDF beside it updates">
 
 ## Building from source
 

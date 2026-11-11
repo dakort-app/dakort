@@ -120,9 +120,9 @@ Windows, `dakort setup -at-boot` runs it before anyone logs in, for a
 machine nobody signs in to. Codex's shell commands do not work there; its
 sandbox needs a signed-in desktop.
 
-### The phone
+### The phone or other device
 
-Dakort reaches your phone through [Tailscale](https://tailscale.com), a
+Dakort reaches your phone or other device through [Tailscale](https://tailscale.com), a
 private network between your own devices. It is free for personal use
 and needs no router settings, no port forwarding and no public address.
 Nothing is exposed to the internet; only devices signed in to your
@@ -130,14 +130,16 @@ Tailscale account can see the computer at all.
 
 1. Install Tailscale on the computer and on the phone, from
    tailscale.com/download or the app store, and sign both in with the
-   same account.
-2. Run `dakort setup` on the computer. It prints the phone's address and
+   same account (a Google account, say).
+2. Run `dakort setup` on the computer. It prints the URL to open on the phone or other device and
    a QR code.
 3. Scan the code with the phone, or type the address. The page asks for
    the password you chose on the computer, once per device.
 
 If Tailscale came after Dakort, run `dakort setup` again and it picks the
-tailnet up. The connection is encrypted by Tailscale itself; the page
+tailnet up.
+
+The connection is encrypted by Tailscale itself; the page
 goes over plain HTTP inside it. For HTTPS on the tailnet, with the lock
 icon, `dakort setup -https` puts it behind Tailscale Serve, which needs
 HTTPS certificates enabled in your Tailscale admin console.
@@ -169,6 +171,7 @@ from [Anthropic's own page](https://code.claude.com/docs/en/setup):
 
 ```
 curl -fsSL https://claude.ai/install.sh | bash      # macOS, Linux
+
 irm https://claude.ai/install.ps1 | iex             # Windows, in PowerShell
 ```
 
@@ -183,6 +186,7 @@ key. From [OpenAI's own page](https://github.com/openai/codex):
 
 ```
 curl -fsSL https://chatgpt.com/codex/install.sh | sh                                     # macOS, Linux
+
 powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"  # Windows
 ```
 
@@ -194,8 +198,8 @@ to an agent that is not installed.
 
 ### Tailscale
 
-For the phone only. [Tailscale](https://tailscale.com) on the computer
-and the phone, as described under Install. Without it, Dakort listens on
+For the phone/other device only. [Tailscale](https://tailscale.com) on the computer
+and the phone/other device, as described under Install. Without it, Dakort listens on
 the computer only, and picks Tailscale up when it is installed later.
 
 ## How it works
@@ -203,8 +207,7 @@ the computer only, and picks Tailscale up when it is installed later.
 The server reads the session files Claude Code and Codex keep, and watches
 them, so a terminal session shows as it goes. Each message you send runs
 the CLI for one turn in the project's folder, `claude -p --resume` or
-Codex's app-server, and streams the result. The page is one embedded web
-app, the same on a laptop and a phone.
+Codex's app-server, and streams the result.
 
 It listens on this computer and your Tailscale addresses only; other
 addresses are refused unless you ask. The page is behind a password you

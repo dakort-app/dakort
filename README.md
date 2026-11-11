@@ -234,6 +234,13 @@ were.
 Yes. The agents run on it, and Dakort is the page in front of them. The
 phone is a window, not a second computer.
 
+### What if Claude Code or Codex asks me to sign in again?
+
+The page offers the sign-in. It shows the agent's own sign-in link, and
+either takes the code the Claude page gives you or shows the code the
+Codex page asks for. Both work from the phone. Signing in from a
+terminal on the computer works too, as always.
+
 ### How do I uninstall it?
 
 Two steps. First `dakort setup -uninstall`, which stops the service and

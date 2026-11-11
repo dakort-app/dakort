@@ -1,6 +1,6 @@
 import { Fragment, useRef, useState, type ReactNode } from 'react'
 import { api, HTTPError, postJSON } from './api'
-import { useConfig } from './config'
+import { releasesURL, useConfig } from './config'
 import { StreamDot } from './Home'
 import { MoonIcon, PlusIcon, SunIcon } from './icons'
 import { busy, tasksTitle } from './live'
@@ -180,6 +180,7 @@ function useFolders(current: string) {
 // right) over the rows.
 export function FolderList({ current, hide }: { current: string; hide?: ReactNode }) {
   const { open, state, row, sheet, pick } = useFolders(current)
+  const build = useStore((s) => s.build)
   const [folded, setFolded] = useState(() => localStorage.getItem(foldedKey) === '1')
   const [all, setAll] = useState(false)
   const fold = () => {
@@ -209,7 +210,7 @@ export function FolderList({ current, hide }: { current: string; hide?: ReactNod
   return (
     <div className="folder-list">
       <div className="panel-head">
-        <button className="fold" onClick={fold} aria-expanded={!folded}>
+        <button className="fold" onClick={fold} aria-expanded={!folded} title={build ? `Dakort ${build}` : undefined}>
           <span className="small faint explorer-title">PROJECTS</span>
           <span className="faint">{folded ? '▸' : '▾'}</span>
         </button>
@@ -245,36 +246,24 @@ export function FolderList({ current, hide }: { current: string; hide?: ReactNod
   )
 }
 
-// VersionLine, under the folder list, names this build (a link to the
-// releases) and, once the server has heard of a newer release (a release
-// event, or the snapshot), says that it is out: installing by itself,
-// about to, or, for a server that leaves updates to the person, with the
-// line to run on the computer. Under the list, so every device sees it
-// and it never covers the work.
+// VersionLine, under the folder list, shows only for a server that
+// leaves updates to the person (dakort setup -auto-update=false), once
+// it has heard of a newer release (a release event, or the snapshot):
+// the tag and the line to run on the computer. A server that updates
+// itself says nothing here; the version is in the Open project sheet and
+// on the PROJECTS header's tooltip. Under the list, so every device sees
+// it and it never covers the work.
 function VersionLine() {
-  const build = useStore((s) => s.build)
   const latest = useStore((s) => s.latest)
-  const update = useStore((s) => s.update)
   const auto = useConfig().autoUpdate
-  const releases = 'https://github.com/dakort-app/dakort/releases'
-  if (!latest) {
-    if (!build) return null
-    return (
-      <div className="notice release version faint small">
-        <a href={releases} target="_blank" rel="noopener noreferrer">
-          Dakort {build}
-        </a>
-      </div>
-    )
-  }
+  if (!latest || auto) return null
   return (
     <div className="notice info release">
       Dakort{' '}
-      <a href={releases} target="_blank" rel="noopener noreferrer">
+      <a href={releasesURL} target="_blank" rel="noopener noreferrer">
         {latest}
       </a>{' '}
-      is out.{' '}
-      {update ? 'It installs itself once nothing is running.' : auto ? 'It installs itself soon.' : <>On the computer: <code>dakort update</code></>}
+      is out. On the computer: <code>dakort update</code>
     </div>
   )
 }

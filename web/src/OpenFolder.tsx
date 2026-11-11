@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, getJSON } from './api'
 import { ago, baseName, folderHash, parentPath } from './route'
 import { FolderIcon } from './icons'
+import { releasesURL } from './config'
 import { refreshLists, useStore } from './store'
 
 // OpenFolder lists every folder Claude has sessions in that is not open
@@ -9,6 +10,7 @@ import { refreshLists, useStore } from './store'
 export function OpenFolder(props: { onClose: () => void }) {
   const folders = useStore((s) => s.folders)
   const sessions = useStore((s) => s.sessions)
+  const build = useStore((s) => s.build) // the one place the version shows, with the PROJECTS header's tooltip
   const [q, setQ] = useState('')
   const [err, setErr] = useState('')
   const [browsing, setBrowsing] = useState(false)
@@ -61,6 +63,15 @@ export function OpenFolder(props: { onClose: () => void }) {
           ))}
           {!recent.length && <li className="faint pad">Nothing matches.</li>}
         </ul>
+        {build && (
+          <div className="sheet-foot">
+            <span className="sheet-version faint">
+              <a href={releasesURL} target="_blank" rel="noopener noreferrer">
+                Dakort {build}
+              </a>
+            </span>
+          </div>
+        )}
       </div>
     </div>
   )

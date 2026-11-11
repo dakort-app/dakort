@@ -1737,10 +1737,18 @@ html.tab-dragging * {
 .notice.release a:hover {
   text-decoration: underline;
 }
-/* The build alone, when no newer release is known: quiet. */
-.notice.release.version {
-  font-style: normal;
+/* The build, at the foot of the Open project sheet: the one place it shows. */
+.sheet-version {
+  margin-right: auto;
   font-size: 11.5px;
+  align-self: center;
+}
+.sheet-version a {
+  color: inherit;
+  text-decoration: none;
+}
+.sheet-version a:hover {
+  text-decoration: underline;
 }
 /* A background task's news (it ended, a monitor printed): what woke Claude. */
 .notice.task {

@@ -30,8 +30,9 @@ func TestNewerRelease(t *testing.T) {
 		{"v0.1.0", "v0.1.0-rc1", false},
 		{"v0.1.0-3-g1a2b3c4", "v0.1.0", false},
 		{"v0.1.0-3-g1a2b3c4-dirty", "v0.1.0", false},
-		{"v0.1.0-3-g1a2b3c4", "v0.1.1", true},
-		{"v0.1.0-rc1-3-g1a2b3c4", "v0.1.0", true},
+		{"v0.1.0-3-g1a2b3c4", "v0.1.1", false}, // a deploy of the dev tree never hears of a release
+		{"v0.1.0-3-g1a2b3c4", "v9.9.9", false},
+		{"v0.1.0-rc1-3-g1a2b3c4", "v0.1.0", false},
 		{"dev", "v0.1.0", false},
 		{"test1", "v0.1.0", false},
 		{"v0.1.0", "nightly", false},
@@ -61,7 +62,7 @@ func TestAutoUpdate(t *testing.T) {
 		want        bool
 	}{
 		{"a release build, an hour-old release", "v0.1.0", time.Hour, true},
-		{"a deploy past a tag", "v0.1.0-3-g1a2b3c4", time.Hour, false},
+		{"a deploy past a tag (never told, never installs)", "v0.1.0-3-g1a2b3c4", time.Hour, false},
 		{"a release too new", "v0.1.0", 3 * time.Hour, false},
 	}
 	for _, c := range cases {

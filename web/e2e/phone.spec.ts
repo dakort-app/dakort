@@ -1648,25 +1648,24 @@ test('background tasks after a turn still show as work', async ({ page }) => {
   await expect(icon).toHaveAttribute('data-state', 'idle')
 })
 
-// The build shows under the folder list; a newer release replaces it once
-// the server says so (a release event; the snapshot after a reconnect
-// too): installing by itself once the server has started on it, else the
-// line to run on the computer (the test server is not a release build, so
-// it leaves updates to the person), so the phone learns of it without a
-// terminal.
-test('the version and a newer release show under the folder list', async ({ page }, info) => {
+// Nothing shows under the folder list until a server that leaves updates
+// to the person (the test server is not a release build, so it does) hears
+// of a newer release (a release event; the snapshot after a reconnect
+// too): then the tag and the line to run on the computer, so the phone
+// learns of it without a terminal. The build itself is at the foot of the
+// Open project sheet and on the PROJECTS header's tooltip, nowhere else.
+test('a newer release is announced under the folder list; the build is in the sheet', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'the explorer is a drawer on a phone')
   await openSession(page, (l) => l[0])
   const play = (ev: object) => page.evaluate((ev) => (window as any).dakort.stream.onEvent(ev), ev)
+  await expect(page.locator('.notice.release')).toHaveCount(0)
+  await expect(page.locator('.folder-list .fold')).toHaveAttribute('title', /^Dakort \S+$/)
+  await page.locator('.folder-list').getByRole('button', { name: 'Open project' }).click()
+  await expect(page.locator('.sheet .sheet-version')).toHaveText(/^Dakort \S+$/)
+  await page.locator('.sheet-back').click({ position: { x: 4, y: 4 } })
+  await expect(page.locator('.sheet')).toHaveCount(0)
+  await play({ type: 'release', latest: 'v9.9.9' })
   const notice = page.locator('.notice.release')
-  await expect(notice).toContainText('Dakort ')
-  await expect(notice).not.toContainText('is out')
-  await play({ type: 'release', latest: 'v9.9.9' })
-  await expect(notice).toContainText('v9.9.9')
-  await expect(notice).toContainText('is out')
-  await expect(notice).toContainText('dakort update')
-  await play({ type: 'release', latest: 'v9.9.9', update: 'v9.9.9' })
-  await expect(notice).toContainText('installs itself once nothing is running')
-  await play({ type: 'release', latest: 'v9.9.9' })
+  await expect(notice).toContainText('v9.9.9 is out')
   await expect(notice).toContainText('dakort update')
 })

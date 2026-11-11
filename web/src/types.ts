@@ -145,5 +145,5 @@ export type Ev = {
   tabs?: string[] // tabs: its open tabs now (absent: none)
   build?: string // snapshot: the server's version; a page from another build reloads itself once hidden
   latest?: string // release, snapshot: a newer release's tag
-  update?: string // release, snapshot: the tag the server is installing by itself
+  update?: string // release, snapshot: the tag the server is installing by itself (not shown; the page stays quiet)
 }

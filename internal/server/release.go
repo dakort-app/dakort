@@ -183,12 +183,18 @@ var (
 )
 
 // NewerRelease reports whether the release tag is newer than this build.
-// A build past a tag (v0.1.0-3-g...) counts as that tag, so the next
-// release is newer and the tag itself is not; a pre-release (v0.1.0-rc1)
-// is older than its release and than a later pre-release (rc2); a build
-// that is no version at all ("dev") is never behind.
+// A pre-release (v0.1.0-rc1) is older than its release and than a later
+// pre-release (rc2). A build past a tag (v0.1.0-3-g..., a deploy of the
+// dev tree by ship.sh, so only the developers' machines) is never behind:
+// the next release is cut from that very tree, and the page used to tell
+// the developer to run dakort update, which would have put the release
+// over a newer deploy (seen 2026-11-11, the day v0.1.1 went out). A build
+// that is no version at all ("dev") is never behind either.
 func NewerRelease(build, tag string) bool {
-	b := releaseRe.FindStringSubmatch(describeRe.ReplaceAllString(build, ""))
+	if describeRe.MatchString(build) {
+		return false
+	}
+	b := releaseRe.FindStringSubmatch(build)
 	t := releaseRe.FindStringSubmatch(tag)
 	if b == nil || t == nil {
 		return false

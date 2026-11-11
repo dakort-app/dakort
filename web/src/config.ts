@@ -23,6 +23,8 @@ export type Config = {
 // one itself.
 export type CLI = { name: 'claude' | 'codex'; found: boolean; install?: string; shell: string; signIn: string }
 
+export const releasesURL = 'https://github.com/dakort-app/dakort/releases'
+
 let config: Promise<Config> | null = null
 export const loadConfig = () => (config ??= getJSON<Config>('/api/config').catch(() => ({})))
 

@@ -61,11 +61,6 @@ else to install. The CLIs run only while a turn runs.
 - **The same page on a phone.** One pane, the explorer as a drawer, the
   same tabs. Light and dark themes.
 
-If you write LaTeX, the PDF opens beside the agent and re-renders as it
-recompiles, with SyncTeX both ways:
-
-![Claude fixes two typos in a .tex file and recompiles; the PDF beside it updates](docs/dakort-latex.gif)
-
 ## Install
 
 ### macOS
@@ -230,14 +225,35 @@ beside them, and the same page opens on a phone.
 ### Does it change my Claude Code or Codex setup?
 
 No. It reads the session files the CLIs keep and runs the CLIs for each
-turn, so the sessions are written by the CLIs, as in a terminal. 
-Uninstalling removes the service and leaves
-your sessions where they were.
+turn, so the sessions are written by the CLIs, as in a terminal.
+Uninstalling removes the service and leaves your sessions where they
+were.
 
 ### Does the computer have to stay on?
 
 Yes. The agents run on it, and Dakort is the page in front of them. The
 phone is a window, not a second computer.
+
+### How do I uninstall it?
+
+Two steps. First `dakort setup -uninstall`, which stops the service and
+removes it. Then remove the program the way it came: `brew uninstall
+--cask dakort`, `scoop uninstall dakort`, or delete the binary on Linux.
+
+Your Claude Code and Codex sessions are not touched; they belong to the
+CLIs. What stays behind is Dakort's own small folders, the password and
+token in the config folder and the logs in the cache folder, named
+`dakort` under the system's usual places (`%APPDATA%` and
+`%LOCALAPPDATA%` on Windows, `~/Library/Application Support` and
+`~/Library/Caches` on macOS, `~/.config` and `~/.cache` on Linux).
+Delete them by hand if you want nothing left.
+
+## LaTeX
+
+If you write LaTeX, the PDF opens beside the agent and re-renders as it
+recompiles, with SyncTeX both ways:
+
+![Claude fixes two typos in a .tex file and recompiles; the PDF beside it updates](docs/dakort-latex.gif)
 
 ## Building from source
 

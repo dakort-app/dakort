@@ -24,13 +24,13 @@ export const extOf = (path: string) => (path.split('.').pop() ?? '').toLowerCase
 export const fileURL = (kind: 'list' | 'raw' | 'stat' | 'open' | 'archive' | 'save', root: string, path: string) =>
   `/api/files/${kind}?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`
 
-// SaveButton downloads the file as it is on disk, to the laptop's
+// DownloadButton downloads the file as it is on disk, to the laptop's
 // Downloads or the phone's files. The server marks it an attachment too,
 // since a phone's browser would open a PDF in place despite download.
-export function SaveButton({ root, path }: { root: string; path: string }) {
+export function DownloadButton({ root, path }: { root: string; path: string }) {
   return (
-    <a className="btn small-btn" href={fileURL('raw', root, path) + '&download=1'} download={path.split('/').pop()} title="Save a copy of the file">
-      Save
+    <a className="btn small-btn" href={fileURL('raw', root, path) + '&download=1'} download={path.split('/').pop()} title="Download a copy of the file">
+      Download
     </a>
   )
 }
@@ -105,6 +105,8 @@ const videos = new Set(['mp4', 'm4v', 'webm'])
 const sounds = new Set(['mp3', 'm4a', 'wav', 'ogg', 'oga', 'flac'])
 const maxText = 2 << 20
 const pollEvery = 3000
+// A touch screen: there an editable view brings up the keyboard on any tap.
+const touch = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
 
 // A spot to jump to when a tab opens or is already open: a line in a
 // source file, or boxes on PDF pages (from SyncTeX). n changes on every
@@ -218,10 +220,13 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
   }, [root, path, stat?.size, stat?.mtime])
 
   // Editing, as VS Code does it: the text on screen is the user's until
-  // they save or close. A change on disk is taken in while nothing is
+  // they save or revert. A change on disk is taken in while nothing is
   // typed yet; with unsaved typing it is announced, and a save is refused
-  // by the server (412) until the user picks Reload or Overwrite.
+  // by the server (412) until the user picks Reload or Overwrite. On a
+  // laptop a text file's source is always editable; on a phone it takes
+  // Edit, since any tap on an editable view brings up the keyboard.
   const [edit, setEdit] = useState<Edit | null>(null)
+  const [phoneEdit, setPhoneEdit] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveErr, setSaveErr] = useState('')
@@ -230,13 +235,16 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
   const typed = useRef(0) // counts changes, so typing during a save stays unsaved
   const text = loaded?.kind === 'text' ? loaded : null
   const key = fileKey(root, path)
+  const editing = !!text?.utf8 && (!touch || phoneEdit)
 
   useEffect(() => {
+    if (!editing || !text) return
+    if (!edit) return setEdit({ text: text.text, base: text.etag })
     // While saving, the new version may come in before the save's answer.
-    if (!edit || !text || text.etag === edit.base || saving) return
+    if (text.etag === edit.base || saving) return
     if (dirty) setConflict(true)
     else setEdit({ text: text.text, base: text.etag })
-  }, [text?.etag])
+  }, [text?.etag, editing])
 
   useEffect(() => {
     if (dirty) unsaved.add(key)
@@ -250,16 +258,14 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
     }
   }, [dirty, key])
 
+  // Phone only: Edit opens the source for editing, Done closes it.
   const startEdit = () => {
-    if (!text) return
     setSource(true) // Markdown, CSV and SVG are edited as source
-    setEdit({ text: text.text, base: text.etag })
-    setDirty(false)
-    setConflict(false)
-    setSaveErr('')
+    setPhoneEdit(true)
   }
   const stopEdit = () => {
     if (dirty && !confirm('Discard your unsaved changes?')) return
+    setPhoneEdit(false)
     setEdit(null)
     setDirty(false)
     setConflict(false)
@@ -295,39 +301,43 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
     typed.current++
     setDirty(true)
   }
-  const canEdit = !!text && text.utf8 && !edit
-
   const head = (
     <div className="file-head">
       <span className="ellipsis grow small faint">
         {path}
         {dirty && ' •'}
       </span>
-      {edit && (
+      {dirty && (
         <>
-          <button className={'btn small-btn' + (dirty ? ' primary' : '')} onClick={() => save()} disabled={!dirty || saving} title="Save (Ctrl+S)">
+          <button className="btn small-btn primary" onClick={() => save()} disabled={saving} title="Save (Ctrl+S)">
             {saving ? 'Saving…' : 'Save'}
           </button>
-          <button className="btn small-btn" onClick={stopEdit}>
-            Done
+          <button className="btn small-btn" onClick={reload} title="Drop your changes and take the file as it is on disk">
+            Revert
           </button>
         </>
       )}
-      {canEdit && (
+      {touch && phoneEdit && (
+        <button className="btn small-btn" onClick={stopEdit}>
+          Done
+        </button>
+      )}
+      {touch && !phoneEdit && text?.utf8 && (
         <button className="btn small-btn" onClick={startEdit} title="Edit the file here">
           Edit
         </button>
       )}
-      {!edit && (ext === 'md' || ext === 'svg' || tables.has(ext)) && (
+      {/* Unsaved typing lives in the source view, so it stays on screen. */}
+      {!dirty && !phoneEdit && (ext === 'md' || ext === 'svg' || tables.has(ext)) && (
         <button className="btn small-btn" onClick={() => setSource(!source)}>
           {source ? (ext === 'md' ? 'Preview' : ext === 'svg' ? 'Picture' : 'Table') : 'Source'}
         </button>
       )}
-      {!edit && (ext === 'html' || ext === 'htm' || office.has(ext)) && <OpenButton root={root} path={path} html={!office.has(ext)} />}
-      {!edit && <SaveButton root={root} path={path} />}
+      {!dirty && (ext === 'html' || ext === 'htm' || office.has(ext)) && <OpenButton root={root} path={path} html={!office.has(ext)} />}
+      {!dirty && <DownloadButton root={root} path={path} />}
     </div>
   )
-  const editNotes = edit && (
+  const editNotes = dirty && (
     <>
       {conflict && (
         <div className="notice error small edit-conflict">
@@ -428,7 +438,7 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
           jump={jump}
           visible={active}
           onLineClick={['tex', 'sty', 'cls', 'bib'].includes(ext) ? showInPdf : undefined}
-          editing={!!edit}
+          editing={editing && !!edit}
           onEdit={onEdit}
           onSave={() => save()}
           doc={doc}

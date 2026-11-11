@@ -66,6 +66,20 @@ export const api = {
     return getJSON<Page>(`/api/sessions/${id}/rows?${q}`)
   },
   after: (id: string, off: number) => getJSON<Page>(`/api/sessions/${id}/rows?after=${off}`),
+  // A CLI's sign-in run by the server (SignIn.tsx): start it, follow it,
+  // hand Claude the pasted code.
+  signIn: (cli: string) => postJSON<SignInState>('/api/signin', { cli }),
+  signInState: (cli: string) => getJSON<SignInState>('/api/signin?cli=' + cli),
+  signInCode: (cli: string, code: string) => postJSON<SignInState>('/api/signin/code', { cli, code }),
+}
+
+export type SignInState = {
+  cli: string
+  state: 'starting' | 'waiting' | 'done' | 'failed'
+  url?: string
+  code?: string // Codex: the one-time code to type on its page
+  pasteCode?: boolean // Claude: its page hands back a code to paste
+  error?: string
 }
 
 export const assetURL = (name: string) => `/api/assets/${name}`

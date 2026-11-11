@@ -132,6 +132,12 @@ textarea {
   padding: 24px;
   text-align: center;
 }
+.center .hint {
+  max-width: 360px;
+  margin: 16px auto 0;
+  font-size: 0.9em;
+  line-height: 1.4;
+}
 .center-text {
   text-align: center;
   padding: 8px;
@@ -1407,6 +1413,17 @@ html.tab-dragging * {
   overflow-y: auto;
   flex-shrink: 0;
 }
+/* The card scrolls inside itself, and the buttons were its last row: with
+   a long command they sat below the card's fold, on a phone right where
+   the prompt box starts (the first phone approval, 2026-11-10, was a
+   near miss). Stuck to the card's bottom edge, they stay in view. */
+.permission .row-buttons {
+  position: sticky;
+  bottom: -10px;
+  margin: 8px -14px -10px;
+  padding: 8px 14px 10px;
+  background: var(--side);
+}
 .perm-title {
   margin-bottom: 4px;
 }
@@ -1675,11 +1692,55 @@ html.tab-dragging * {
   color: var(--faint);
   font-style: italic;
 }
+/* The sign-in under a failed turn (SignIn.tsx): a link, a code to type or
+   paste, a button; the terminal way as a faint line under it. */
+.notice.signin {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  line-height: 1.45;
+}
+.notice.signin .row-buttons {
+  margin-top: 2px;
+  align-items: center;
+}
+.notice.signin a {
+  color: inherit;
+  text-decoration: underline;
+}
+.notice.signin .signin-code {
+  font-size: 1.05em;
+  letter-spacing: 0.08em;
+}
+.notice.signin .signin-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 260px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+}
 /* A newer release, under the folder list (FolderBar.tsx). */
 .notice.release {
   margin: 2px 10px 6px;
   padding: 2px 0;
   font-size: 12.5px;
+}
+.notice.release a {
+  color: inherit;
+  text-decoration: none;
+}
+.notice.release a:hover {
+  text-decoration: underline;
+}
+/* The build alone, when no newer release is known: quiet. */
+.notice.release.version {
+  font-style: normal;
+  font-size: 11.5px;
 }
 /* A background task's news (it ended, a monitor printed): what woke Claude. */
 .notice.task {

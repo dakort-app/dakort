@@ -53,7 +53,8 @@ func (c *cliPaths) Codex() string {
 
 // cliStatus is one CLI as the UI shows it: whether it is here, and, if
 // not, the command that installs it on this OS. Signing in is the CLI's
-// own first run, in a terminal.
+// own first run, in a terminal, or from the page (signin.go) once it is
+// installed.
 type cliStatus struct {
 	Name    string `json:"name"` // claude or codex
 	Found   bool   `json:"found"`
@@ -86,8 +87,10 @@ func installHint(name, path string) string {
 	switch {
 	case path != "":
 		return ""
+	case name == "codex" && runtime.GOOS == "windows":
+		return `powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"`
 	case name == "codex":
-		return "npm install -g @openai/codex"
+		return "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
 	case runtime.GOOS == "windows":
 		return "irm https://claude.ai/install.ps1 | iex"
 	default:

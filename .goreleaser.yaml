@@ -60,14 +60,18 @@ homebrew_casks:
     directory: Casks
     skip_upload: auto # a release candidate stays off the tap
     homepage: https://github.com/dakort-app/dakort
-    description: Claude Code and Codex on your phone, with your real sessions
+    description: All your Claude Code and Codex projects in one light window, with the files beside the agent
     license: MIT
     binaries: [dakort]
+    # The binary is not signed, so macOS would refuse a quarantined copy.
+    # The steps block is Homebrew's declarative DSL (run, remove), not
+    # Ruby: the first public install (2026-11-10, a Mac) failed with
+    # "undefined method 'system_command'" from the old form.
     hooks:
       post:
         install_steps: |
-          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/dakort"]
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/dakort"]
           end
 
 scoops:
@@ -78,7 +82,7 @@ scoops:
       token: "{{ .Env.TAP_TOKEN }}"
     skip_upload: auto # a release candidate stays off the bucket
     homepage: https://github.com/dakort-app/dakort
-    description: Claude Code and Codex on your phone, with your real sessions
+    description: All your Claude Code and Codex projects in one light window, with the files beside the agent
     license: MIT
 
 nfpms:

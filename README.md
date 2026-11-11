@@ -141,15 +141,20 @@ HTTPS certificates enabled in your Tailscale admin console.
 
 ### Updating
 
-The page says when a newer release is out. Then, on the computer:
+Dakort updates itself. When a newer release has been out for an hour, the
+service fetches it, checks it against the release's checksums, and
+restarts with it once nothing is running. The line under the project list
+names the version you are on and says when a newer one is on its way.
+
+To keep that in your own hands, run `dakort setup -auto-update=false`
+once. Then, when the page says a release is out:
 
 ```
 dakort update
 ```
 
-It fetches the release, checks it, and restarts the service once nothing
-is running. After an update through brew, winget or scoop, run
-`dakort setup` again instead.
+After an update through brew, winget or scoop, run `dakort setup` again
+instead, so the service takes the new copy.
 
 ## What it needs
 

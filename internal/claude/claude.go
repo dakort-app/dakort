@@ -106,6 +106,12 @@ func (o Options) args() []string {
 	if o.PermissionMode != "" {
 		a = append(a, "--permission-mode", o.PermissionMode)
 	}
+	// Lets a later set_permission_mode switch a held process into
+	// bypassPermissions. Without it the CLI refuses the switch
+	// ("bypass_not_launched", measured 2026-11-10) and the process stays
+	// in the mode it was started with, while the page's chip says Bypass.
+	// The flag does not change the starting mode; the user's choice does.
+	a = append(a, "--allow-dangerously-skip-permissions")
 	if o.SettingSources != "" {
 		a = append(a, "--setting-sources", o.SettingSources)
 	}

@@ -4,7 +4,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { getJSON, HTTPError } from './api'
 import { FindBar } from './FindBar'
-import { fileURL, SaveButton, synctexURL, type Jump, type SyncBox } from './FileView'
+import { fileURL, DownloadButton, synctexURL, type Jump, type SyncBox } from './FileView'
 import { find, foldQuery, pageText, type FindOpts, type Hit, type PageText, type Run } from './pdffind'
 import { GAP, posAt, scrollFor, tops, type Pos } from './pdfpos'
 import { useStore } from './store'
@@ -467,7 +467,7 @@ export function PdfView({ root, path, target, onSource }: Props) {
         <button className="btn small-btn" onClick={() => zoomBy(1.2)} aria-label="Zoom in">
           +
         </button>
-        <SaveButton root={root} path={path} />
+        <DownloadButton root={root} path={path} />
       </div>
       {finding && (
         <FindBar

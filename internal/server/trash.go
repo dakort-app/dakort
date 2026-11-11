@@ -179,7 +179,8 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 		Claude        *claudeInfo `json:"claude,omitempty"`   // the CLI's model list; absent until the CLI answers
 		Codex         *codexInfo  `json:"codex,omitempty"`    // absent when Codex is not installed
 		CLIs          []cliStatus `json:"clis"`
-	}{st.Model, st.EffortLevel, st.Permissions.DefaultMode, st.PromptCacheTTL, s.claudeInfo(r.Context()), s.codexInfo(r.Context()), s.runner.clis.status()})
+		AutoUpdate    bool        `json:"autoUpdate"` // this server installs newer releases by itself (release.go)
+	}{st.Model, st.EffortLevel, st.Permissions.DefaultMode, st.PromptCacheTTL, s.claudeInfo(r.Context()), s.codexInfo(r.Context()), s.runner.clis.status(), s.autoUpdate})
 }
 
 // claudeSettings is the part of ~/.claude/settings.json the server reads.

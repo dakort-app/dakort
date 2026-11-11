@@ -49,6 +49,7 @@ import (
 	"io/fs"
 	"log"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -93,6 +94,7 @@ type Config struct {
 	Assets     transcript.Dir
 	ClaudeBin  string        // found on PATH or in ~/.local/bin when empty
 	CodexBin   string        // found on PATH (the npm script's real program) when empty
+	CLIEnv     []string      // added to a sign-in command's environment; tests point the CLIs' config folders elsewhere
 	MaxTurns   int           // concurrent CLI processes; 3 when zero
 	Folders    string        // the open-folder list's file; in memory only when empty
 	Moves      string        // the folder renames (move.go); in memory only when empty
@@ -130,9 +132,12 @@ type Server struct {
 	restart     func()
 	restartOnce sync.Once
 
-	cmds   commandCache // the "/" menu per folder (commands.go)
-	claude claudeCache  // the Claude model list (claudeinfo.go)
-	codex  codexCache   // the Codex model list (codexinfo.go)
+	cmds    commandCache // the "/" menu per folder (commands.go)
+	claude  claudeCache  // the Claude model list (claudeinfo.go)
+	codex   codexCache   // the Codex model list (codexinfo.go)
+	signins signIns      // sign-ins run from the page (signin.go)
+
+	autoUpdate bool // newer releases are installed by this server itself (release.go); told to the page
 
 	stop      chan struct{}
 	done      sync.WaitGroup
@@ -156,6 +161,8 @@ func New(c Config) *Server {
 		idx: c.Index, assets: c.Assets, hub: newHub(), stop: make(chan struct{}),
 		store: loadFolders(c.Folders), moves: loadMoves(c.Moves), seen: loadSeen(c.Seen), tabs: loadTabs(c.Tabs), ping: c.PingEvery, pw: &passwords{file: c.Password}, trash: c.Trash, restart: c.Restart}
 	s.hub.build = c.Version
+	s.signins.env = c.CLIEnv
+	s.autoUpdate = c.Release.On && c.Release.Auto && c.Release.Update != nil && autoUpdates(c.Version)
 	emptyTrash(c.Trash)
 	if c.Index != nil {
 		c.Index.SetMoved(s.moves.apply)
@@ -190,6 +197,7 @@ func (s *Server) Close() {
 	s.closeOnce.Do(func() {
 		close(s.stop)
 		s.runner.stop()
+		s.signins.stopAll()
 		s.done.Wait()
 	})
 }
@@ -232,6 +240,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/rename", s.rename)
 	mux.HandleFunc("POST /api/trash/{name}/restore", s.restoreSession)
 	mux.HandleFunc("GET /api/config", s.config)
+	mux.HandleFunc("POST /api/signin", s.signInStart)
+	mux.HandleFunc("GET /api/signin", s.signInStatus)
+	mux.HandleFunc("POST /api/signin/code", s.signInCode)
+	mux.HandleFunc("POST /api/signin/cancel", s.signInCancel)
 	mux.HandleFunc("GET /api/commands", s.commands)
 	mux.HandleFunc("POST /api/restart", s.restartWhenIdle)
 	mux.HandleFunc("GET /api/events", s.events)
@@ -660,6 +672,11 @@ func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		log.Printf("write response: %v", err)
+		// A tab that went away mid-reply (every restart cuts a few off) is
+		// not worth a line; a value that cannot be encoded is.
+		var ne *net.OpError
+		if !errors.As(err, &ne) {
+			log.Printf("write response: %v", err)
+		}
 	}
 }

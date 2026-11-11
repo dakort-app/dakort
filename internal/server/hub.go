@@ -61,6 +61,7 @@ type Ev struct {
 	Tabs         []string                `json:"tabs,omitempty"`         // tabs: its open tabs now (none: empty)
 	Build        string                  `json:"build,omitempty"`        // snapshot: the server's version; a page loaded from another build reloads once hidden
 	Latest       string                  `json:"latest,omitempty"`       // release, snapshot: a newer release's tag (release.go)
+	Update       string                  `json:"update,omitempty"`       // release, snapshot: the tag the server is installing by itself
 }
 
 type Permission struct {
@@ -136,6 +137,7 @@ type hub struct {
 	left   map[string][]procs.Info // by session
 	build  string                  // the server's version, in every snapshot: a page from an older build reloads itself
 	latest string                  // a newer release's tag, once found (release.go), in every snapshot
+	update string                  // the tag being installed by itself (release.go), in every snapshot
 }
 
 func newHub() *hub {
@@ -284,7 +286,7 @@ func (h *hub) subscribe(last string) (s *sub, replay []event, snap *event) {
 	for s, l := range h.left {
 		left[s] = l
 	}
-	data, _ := json.Marshal(Ev{Type: "snapshot", Turns: turns, Background: bg, Queues: qs, AllLeftovers: left, Gap: last != "", Build: h.build, Latest: h.latest})
+	data, _ := json.Marshal(Ev{Type: "snapshot", Turns: turns, Background: bg, Queues: qs, AllLeftovers: left, Gap: last != "", Build: h.build, Latest: h.latest, Update: h.update})
 	return s, nil, &event{seq: h.seq, id: fmt.Sprintf("%s-%d", h.epoch, h.seq), data: data}
 }
 

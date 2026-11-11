@@ -24,6 +24,19 @@ describe('markdown files', () => {
     expect(html).toMatch(/href="https:\/\/example.org" target="_blank" rel="noopener noreferrer"/)
   })
 
+  it('shows a plain <img> tag as the image it names, sized as asked', () => {
+    const html = render('<img src="docs/a.gif" width="800" alt="the page">\n\nand <img src="https://x.org/p.png" height="20"/> inline', {
+      resolve,
+    })
+    expect(html).toContain('<img src="/raw?p=docs/a.gif" alt="the page" width="800" loading="lazy">')
+    expect(html).toContain('<img src="https://x.org/p.png" alt="" height="20" loading="lazy"> inline')
+    expect(html).not.toContain('&lt;img')
+    // Anything beyond src, alt, width and height stays text.
+    for (const tag of ['<img src="a.png" onerror="alert(1)">', '<img src="a.png" style="x">', '<img src=a.png>', "<img src='a.png'>"]) {
+      expect(render(tag)).not.toContain('<img')
+    }
+  })
+
   it('keeps raw HTML escaped', () => {
     const html = render('<script>alert(1)</script> <img src=x onerror=alert(1)>')
     expect(html).not.toContain('<script>')

@@ -1,7 +1,7 @@
 import { renderAsync } from 'docx-preview'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FindBar } from './FindBar'
-import { fileURL, SaveButton } from './FileView'
+import { fileURL, DownloadButton } from './FileView'
 import { foldQuery, pageText, spans, type FindOpts } from './pdffind'
 
 // A Word file drawn in the browser by docx-preview: pages as Word lays
@@ -216,7 +216,7 @@ export function DocxView({ root, path, version }: Props) {
         <button className="btn small-btn" onClick={() => zoomBy(1.2)} aria-label="Zoom in">
           +
         </button>
-        <SaveButton root={root} path={path} />
+        <DownloadButton root={root} path={path} />
       </div>
       {finding && (
         <FindBar

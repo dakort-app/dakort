@@ -21,23 +21,39 @@ import (
 // quiet: the notice is a courtesy.
 //
 //	release   Latest: the newest release's tag, newer than this build
+//	          Update: that tag once the server is installing it by itself
+//
+// With Auto on, a release build installs the newer release by itself:
+// Update runs `dakort update` (which fetches, checks, stages and asks
+// this server to restart once nothing runs, held processes included),
+// once the release has been out for MinAge, so a release pulled within
+// the hour never reaches anyone. Only a build that is exactly a release
+// (v0.1.1, not v0.1.1-3-g... from a deploy of the dev tree, which would
+// be replaced by the release it is past) updates itself; see autoUpdates.
 
 type ReleaseConfig struct {
-	On    bool
-	Repo  string        // owner/name; releaseRepo when empty
-	API   string        // the GitHub API's base; api.github.com when empty (tests)
-	Every time.Duration // how often to ask; releaseEvery when zero
-	First time.Duration // the wait before the first ask; releaseFirst when zero
+	On     bool
+	Repo   string        // owner/name; releaseRepo when empty
+	API    string        // the GitHub API's base; api.github.com when empty (tests)
+	Every  time.Duration // how often to ask; releaseEvery when zero
+	First  time.Duration // the wait before the first ask; releaseFirst when zero
+	Auto   bool          // install a newer release by itself, through Update
+	MinAge time.Duration // how long a release must have been out before Auto takes it; releaseMinAge when zero
+	Update func(tag string) error
 }
 
 const (
-	releaseRepo  = "dakort-app/dakort"
-	releaseAPI   = "https://api.github.com"
-	releaseEvery = 6 * time.Hour
-	releaseFirst = time.Minute
+	releaseRepo   = "dakort-app/dakort"
+	releaseAPI    = "https://api.github.com"
+	releaseEvery  = 6 * time.Hour
+	releaseFirst  = time.Minute
+	releaseMinAge = time.Hour
 )
 
 func (c ReleaseConfig) withDefaults() ReleaseConfig {
+	if c.MinAge == 0 {
+		c.MinAge = releaseMinAge
+	}
 	if c.Repo == "" {
 		c.Repo = releaseRepo
 	}
@@ -68,9 +84,10 @@ func (s *Server) releaseLoop(c ReleaseConfig) {
 	}
 }
 
-// checkRelease asks once and announces a newer tag, once per tag.
+// checkRelease asks once and announces a newer tag, once per tag; with
+// Auto on it then installs the tag, once it is old enough.
 func (s *Server) checkRelease(c ReleaseConfig) {
-	tag, err := latestTag(c)
+	tag, published, err := latestTag(c)
 	if err != nil {
 		log.Printf("the latest release: %v", err)
 		return
@@ -86,36 +103,75 @@ func (s *Server) checkRelease(c ReleaseConfig) {
 		log.Printf("%s is out (this is %s)", tag, s.hub.build)
 		s.hub.publish(Ev{Type: "release", Latest: tag})
 	}
+	if !c.Auto || c.Update == nil || !autoUpdates(s.hub.build) {
+		return
+	}
+	if age := time.Since(published); age < c.MinAge {
+		log.Printf("%s has been out %s; installing it after %s", tag, age.Round(time.Minute), c.MinAge)
+		return
+	}
+	s.hub.mu.Lock()
+	going := s.hub.update == tag
+	s.hub.update = tag
+	s.hub.mu.Unlock()
+	if going {
+		return
+	}
+	log.Printf("installing %s", tag)
+	s.hub.publish(Ev{Type: "release", Latest: tag, Update: tag})
+	s.done.Add(1)
+	go func() {
+		defer s.done.Done()
+		if err := c.Update(tag); err != nil {
+			log.Printf("installing %s: %v", tag, err)
+			s.hub.mu.Lock()
+			s.hub.update = ""
+			s.hub.mu.Unlock()
+			s.hub.publish(Ev{Type: "release", Latest: tag})
+		}
+	}()
+}
+
+// autoUpdates reports whether a build may replace itself with a release:
+// one that is exactly a release tag (a release candidate included), not
+// a deploy past a tag and not a dev build.
+func autoUpdates(build string) bool {
+	return releaseRe.MatchString(build) && !describeRe.MatchString(build)
 }
 
 // latestTag is the tag of the repo's latest release (not a draft or a
-// pre-release, as GitHub counts them).
-func latestTag(c ReleaseConfig) (string, error) {
+// pre-release, as GitHub counts them) and when it was published (now,
+// when GitHub does not say, so Auto waits).
+func latestTag(c ReleaseConfig) (string, time.Time, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET", c.API+"/repos/"+c.Repo+"/releases/latest", nil)
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("%s: %s", req.URL, resp.Status)
+		return "", time.Time{}, fmt.Errorf("%s: %s", req.URL, resp.Status)
 	}
 	var r struct {
-		Tag string `json:"tag_name"`
+		Tag       string    `json:"tag_name"`
+		Published time.Time `json:"published_at"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
 	if r.Tag == "" {
-		return "", fmt.Errorf("%s: no tag_name", req.URL)
+		return "", time.Time{}, fmt.Errorf("%s: no tag_name", req.URL)
 	}
-	return r.Tag, nil
+	if r.Published.IsZero() {
+		r.Published = time.Now()
+	}
+	return r.Tag, r.Published, nil
 }
 
 // A version as git describe prints it: the tag, and past it the commits

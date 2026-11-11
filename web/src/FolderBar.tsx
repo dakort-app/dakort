@@ -1,5 +1,6 @@
 import { Fragment, useRef, useState, type ReactNode } from 'react'
 import { api, HTTPError, postJSON } from './api'
+import { useConfig } from './config'
 import { StreamDot } from './Home'
 import { MoonIcon, PlusIcon, SunIcon } from './icons'
 import { busy, tasksTitle } from './live'
@@ -238,22 +239,42 @@ export function FolderList({ current, hide }: { current: string; hide?: ReactNod
           )}
         </>
       )}
-      <ReleaseNotice />
+      <VersionLine />
       {sheet}
     </div>
   )
 }
 
-// ReleaseNotice says a newer release is out, once the server has heard of
-// one (a release event, or the snapshot), with the line to run on the
-// computer. Under the folder list, so every device sees it and it never
-// covers the work.
-function ReleaseNotice() {
+// VersionLine, under the folder list, names this build (a link to the
+// releases) and, once the server has heard of a newer release (a release
+// event, or the snapshot), says that it is out: installing by itself,
+// about to, or, for a server that leaves updates to the person, with the
+// line to run on the computer. Under the list, so every device sees it
+// and it never covers the work.
+function VersionLine() {
+  const build = useStore((s) => s.build)
   const latest = useStore((s) => s.latest)
-  if (!latest) return null
+  const update = useStore((s) => s.update)
+  const auto = useConfig().autoUpdate
+  const releases = 'https://github.com/dakort-app/dakort/releases'
+  if (!latest) {
+    if (!build) return null
+    return (
+      <div className="notice release version faint small">
+        <a href={releases} target="_blank" rel="noopener noreferrer">
+          Dakort {build}
+        </a>
+      </div>
+    )
+  }
   return (
     <div className="notice info release">
-      Dakort {latest} is out. On the computer: <code>dakort update</code>
+      Dakort{' '}
+      <a href={releases} target="_blank" rel="noopener noreferrer">
+        {latest}
+      </a>{' '}
+      is out.{' '}
+      {update ? 'It installs itself once nothing is running.' : auto ? 'It installs itself soon.' : <>On the computer: <code>dakort update</code></>}
     </div>
   )
 }

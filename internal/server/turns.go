@@ -283,6 +283,9 @@ func (r *runner) send(session string, req sendRequest) (sendReply, error) {
 		go proc.Close() // stop began while it started; run sees the exit
 	}
 	r.mu.Unlock()
+	// One line per turn with what it runs as, so "it asked me even in
+	// Bypass" can be answered from the log (2026-11-10: it could not be).
+	log.Printf("session %s: turn, %s %s mode=%s", session, provider, st.model, st.permissionMode)
 	r.hub.publish(Ev{Type: "turn", Session: session, PromptID: req.PromptID, State: "starting", Idle: req.idle})
 	go r.run(t, proc, agent.Message{Text: req.Text, Images: req.Images})
 	return reply, nil
@@ -399,6 +402,7 @@ func (r *runner) sendHeld(t *turn, st sessionSettings, req sendRequest) {
 			}
 		}
 	}
+	log.Printf("session %s: turn on the held process, %s mode=%s (was %s)", t.session, st.model, st.permissionMode, was.permissionMode)
 	r.hub.publish(Ev{Type: "turn", Session: t.session, PromptID: req.PromptID, State: "starting", Idle: req.idle})
 	if err := proc.Send(agent.Message{Text: req.Text, Images: req.Images}); err != nil {
 		// The process is gone; its exit event ends the turn with an error.

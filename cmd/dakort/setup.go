@@ -39,16 +39,17 @@ import (
 // The password is chosen in the browser, on this machine, the first time
 // the page opens (the login page asks); the phone then logs in with it.
 type setupOpts struct {
-	port      int
-	force     bool
-	atBoot    bool // Windows: run at boot, in session 0, instead of from login
-	noBrowser bool
-	https     bool
-	httpsPort int
-	uninstall bool
-	home      string // the install folder: bin, logs, the service's files
-	data      string // the server's -data, when not the user's config folder
-	name      string // the task, agent or unit name
+	port       int
+	force      bool
+	atBoot     bool // Windows: run at boot, in session 0, instead of from login
+	noBrowser  bool
+	https      bool
+	httpsPort  int
+	uninstall  bool
+	autoUpdate bool   // the service installs newer releases by itself (the default)
+	home       string // the install folder: bin, logs, the service's files
+	data       string // the server's -data, when not the user's config folder
+	name       string // the task, agent or unit name
 
 	// The elevated child on Windows: the cold path alone, its output to a
 	// file the parent prints.
@@ -70,6 +71,7 @@ func setupMain(args []string) {
 	fs.BoolVar(&o.https, "https", false, "also put it behind Tailscale Serve, for HTTPS on the tailnet (needs HTTPS certificates enabled for the tailnet)")
 	fs.IntVar(&o.httpsPort, "https-port", 443, "the HTTPS port for -https")
 	fs.BoolVar(&o.uninstall, "uninstall", false, "stop and remove the service; the files, token and sessions stay")
+	fs.BoolVar(&o.autoUpdate, "auto-update", true, "the service installs newer releases by itself, once nothing runs; -auto-update=false leaves that to you (dakort update)")
 	fs.StringVar(&o.home, "home", "", "the install folder (default: the user's app folder)")
 	fs.StringVar(&o.data, "data", "", "the server's data folder (default: the user's config folder)")
 	fs.StringVar(&o.name, "name", "", "the service's name (default: "+defaultServiceName+")")
@@ -218,7 +220,7 @@ func report(o setupOpts, svc service, base, token string) {
 	if p, err := codex.FindBinary(); err == nil {
 		fmt.Println("codex:", p)
 	} else {
-		fmt.Println("codex: not found (optional); npm install -g @openai/codex, then codex login")
+		fmt.Println("codex: not found (optional); install it from https://github.com/openai/codex, run codex once and sign in with ChatGPT, then run dakort setup again")
 	}
 
 	login := fmt.Sprintf("%s/login?token=%s", base, token)
@@ -490,6 +492,9 @@ func stripPATH(def string) string {
 // serverArgs is the service's command line after the binary.
 func (o setupOpts) serverArgs() []string {
 	args := []string{"-service", "-idle-compact", "-addr", fmt.Sprintf("127.0.0.1:%d", o.port)}
+	if !o.autoUpdate {
+		args = append(args, "-auto-update=false")
+	}
 	if o.data != "" {
 		args = append(args, "-data", o.data)
 	}

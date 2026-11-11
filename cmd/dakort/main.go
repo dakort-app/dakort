@@ -61,6 +61,7 @@ func main() {
 	// Off by default: a second server (a test one on 3003) compacting the
 	// same sessions as the installed one would fork them.
 	idleCompact := flag.Bool("idle-compact", false, "compact big sessions shortly before their prompt cache expires")
+	autoUpdate := flag.Bool("auto-update", true, "as the service, install a newer release by itself once nothing runs (a release build only)")
 	// A test server (the browser checks on 3003) keeps its token, folder
 	// list, settings and trash apart from the installed one's, or the two
 	// would write the same files and the checks would open and close
@@ -70,6 +71,12 @@ func main() {
 	flag.Parse()
 	if *showVersion {
 		fmt.Println("dakort", version)
+		// The service runs from its own copy, which updates itself; when
+		// that copy is another build, say so, or a bug report names the
+		// wrong one.
+		if said := installedVersion(); said != "" && said != version {
+			fmt.Println("the installed service:", said)
+		}
 		return
 	}
 	if *logPath != "" {
@@ -132,7 +139,7 @@ func main() {
 		Trash:      filepath.Join(cache, "trash"),
 		Settings:   filepath.Join(cfg, "sessions.json"),
 		Compact:    server.CompactConfig{On: *idleCompact},
-		Release:    server.ReleaseConfig{On: true},
+		Release:    server.ReleaseConfig{On: true, Auto: *autoUpdate && *service, Update: autoUpdater(addrs[0], *data)},
 		WarmModels: true,
 		Version:    version,
 		Restart: func() {

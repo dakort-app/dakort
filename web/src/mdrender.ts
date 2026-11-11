@@ -45,7 +45,48 @@ function make() {
       `<div class="code-block">${plainRule(tokens, idx, options, env, self)}${copyButton}</div>\n`
   }
   md.core.ruler.push('table_columns', (state) => markColumns(state.tokens))
+  // Before linkify (an inline rule here), which would otherwise cut the
+  // URL out of the src attribute.
+  md.inline.ruler.before('linkify', 'img_tag', imgTagRule)
   return md
+}
+
+// READMEs on GitHub size a picture with an <img> tag, which Markdown
+// cannot. With raw HTML off, the tag would show as text, so a tag with
+// nothing but src, alt, width and height (quoted, no other attribute, so
+// no handler or style) becomes the image it names, sized as asked. The
+// src goes through the same relative-path rewrite as a Markdown image.
+const imgTag = /<img\s+((?:(?:src|alt|width|height)="[^"<>]*"\s*)+)\/?>/y
+const imgAttr = /(src|alt|width|height)="([^"<>]*)"/g
+
+type InlineState = {
+  src: string
+  pos: number
+  push(type: string, tag: string, nesting: 0 | 1 | -1): Tok & { attrSet(name: string, value: string): void; children: Tok[] | null }
+  Token: new (type: string, tag: string, nesting: 0 | 1 | -1) => Tok
+}
+
+function imgTagRule(state: InlineState, silent: boolean): boolean {
+  if (state.src.charCodeAt(state.pos) !== 0x3c /* < */) return false
+  imgTag.lastIndex = state.pos
+  const m = imgTag.exec(state.src)
+  if (!m) return false
+  const attrs: Record<string, string> = {}
+  for (const a of m[1].matchAll(imgAttr)) attrs[a[1]] = a[2]
+  if (!attrs.src) return false
+  if (!silent) {
+    const img = state.push('image', 'img', 0)
+    img.attrSet('src', attrs.src)
+    img.attrSet('alt', '')
+    if (attrs.width) img.attrSet('width', attrs.width)
+    if (attrs.height) img.attrSet('height', attrs.height)
+    const alt = new state.Token('text', '', 0)
+    alt.content = attrs.alt ?? ''
+    img.content = alt.content
+    img.children = [alt]
+  }
+  state.pos += m[0].length
+  return true
 }
 
 // A table's short columns do not wrap and its long ones keep some width.

@@ -15,6 +15,7 @@ export type Config = {
   claude?: { models: ClaudeModel[]; defaultModel?: string } // from the CLI; absent until it answers
   codex?: { models: CodexModel[]; defaultModel?: string; defaultEffort?: string }
   clis?: CLI[]
+  autoUpdate?: boolean // the server installs newer releases by itself
 }
 
 // A CLI the app runs: whether it is installed here and, if not, the

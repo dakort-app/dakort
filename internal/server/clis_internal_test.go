@@ -24,7 +24,7 @@ func TestCLIInstalledLater(t *testing.T) {
 	if st[0].Found || !strings.Contains(st[0].Install, "claude.ai/install") || st[0].SignIn != "claude" {
 		t.Errorf("claude missing: %+v", st[0])
 	}
-	if st[1].Found || st[1].Install != "npm install -g @openai/codex" {
+	if st[1].Found || !strings.Contains(st[1].Install, "chatgpt.com/codex/install") {
 		t.Errorf("codex missing: %+v", st[1])
 	}
 	installed = true

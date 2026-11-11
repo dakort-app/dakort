@@ -43,6 +43,59 @@ func TestNewerRelease(t *testing.T) {
 	}
 }
 
+// With Auto on, a release build installs a newer release by itself once
+// it has been out for MinAge, through Update, and the snapshot names the
+// tag being installed; a build past a tag (a deploy of the dev tree) and
+// a release younger than MinAge are left alone.
+func TestAutoUpdate(t *testing.T) {
+	published := time.Now().Add(-2 * time.Hour)
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tag_name":"v9.9.9","draft":false,"prerelease":false,"published_at":"` + published.UTC().Format(time.RFC3339) + `"}`))
+	}))
+	defer gh.Close()
+
+	cases := []struct {
+		name, build string
+		minAge      time.Duration
+		want        bool
+	}{
+		{"a release build, an hour-old release", "v0.1.0", time.Hour, true},
+		{"a deploy past a tag", "v0.1.0-3-g1a2b3c4", time.Hour, false},
+		{"a release too new", "v0.1.0", 3 * time.Hour, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			got := make(chan string, 1)
+			s := New(Config{Token: "tok", Version: c.build,
+				Index: &index.Index{Root: filepath.Join(root, "projects"), Registry: filepath.Join(root, "sessions")},
+				Release: ReleaseConfig{On: true, API: gh.URL, First: 20 * time.Millisecond, Every: time.Hour, Auto: true, MinAge: c.minAge,
+					Update: func(tag string) error { got <- tag; return nil }}})
+			t.Cleanup(s.Close)
+			select {
+			case tag := <-got:
+				if !c.want {
+					t.Fatalf("installed %s", tag)
+				}
+				if tag != "v9.9.9" {
+					t.Fatalf("installed %s", tag)
+				}
+				s.hub.mu.Lock()
+				u := s.hub.update
+				s.hub.mu.Unlock()
+				if u != "v9.9.9" {
+					t.Errorf("the hub's update is %q", u)
+				}
+			case <-time.After(time.Second):
+				if c.want {
+					t.Fatal("nothing installed within a second")
+				}
+			}
+		})
+	}
+}
+
 // A server on v0.1.0 hears from the fake GitHub that v9.9.9 is out: the
 // pages get a release event, once, and the next snapshot names it.
 func TestReleaseNotice(t *testing.T) {

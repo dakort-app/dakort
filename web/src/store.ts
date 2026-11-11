@@ -38,6 +38,8 @@ export type State = {
   finished: string[] // sessions that finished a turn while not on screen, newest last
   tabs: Record<string, string[]> // per folder (folderKey): its open tabs, shared by every device; absent until asked for
   latest: string // a newer release's tag, once the server has found one; '' until then
+  update: string // the tag the server is installing by itself; '' until then
+  build: string // the server's version, from the snapshot
 }
 
 let state: State = {
@@ -56,6 +58,8 @@ let state: State = {
   finished: [],
   tabs: {},
   latest: '',
+  update: '',
+  build: '',
 }
 const listeners = new Set<() => void>()
 
@@ -295,11 +299,15 @@ function handle(e: Ev) {
       // A fresh connect or a gap: lists and transcripts may be behind.
       refreshLists()
       catchUp()
-      if (e.build) newBuild(e.build)
+      if (e.build) {
+        newBuild(e.build)
+        set({ build: e.build })
+      }
       if (e.latest) set({ latest: e.latest })
+      set({ update: e.update ?? '' })
       break
     case 'release':
-      set({ latest: e.latest ?? '' })
+      set({ latest: e.latest ?? '', update: e.update ?? '' })
       break
     case 'tabs':
       if (e.folder) set({ tabs: { ...state.tabs, [folderKey(e.folder)]: e.tabs ?? [] } })

@@ -34,6 +34,10 @@ export function Home() {
           <button className="btn primary" onClick={() => setPicking(true)}>
             Open project
           </button>
+          <p className="faint hint">
+            A project is a folder. Folders where Claude Code or Codex has run are listed first, with their sessions. Or pick any folder and
+            start a session in it.
+          </p>
         </div>
       )}
       {picking && <OpenFolder onClose={() => setPicking(false)} />}

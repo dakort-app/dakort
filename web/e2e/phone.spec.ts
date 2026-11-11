@@ -496,7 +496,7 @@ test('a missing CLI is named with its install command', async ({ page }) => {
     const cfg = await res.json()
     cfg.clis = [
       { name: 'claude', found: false, install: 'curl -fsSL https://claude.ai/install.sh | bash', shell: 'a terminal', signIn: 'claude' },
-      { name: 'codex', found: false, install: 'npm install -g @openai/codex', shell: 'a terminal', signIn: 'codex' },
+      { name: 'codex', found: false, install: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh', shell: 'a terminal', signIn: 'codex' },
     ]
     delete cfg.codex
     await route.fulfill({ response: res, json: cfg })
@@ -614,11 +614,14 @@ test('a CSV file shows as a table', async ({ page }, info) => {
   await expect(table).toBeVisible()
 })
 
-// Editing a text file: Edit, type, Ctrl+S sends the text with the version
-// it was edited from; a change on disk is taken in while nothing is typed,
-// and with typing pending a refused save offers Reload and Overwrite. Not
-// UTF-8: no Edit. Served by the test, so nothing is written.
+// Editing a text file: the source is editable at once on a laptop, after
+// Edit on a phone. Save and Revert show only with changes; Ctrl+S sends
+// the text with the version it was edited from; a change on disk is taken
+// in while nothing is typed, and with typing pending a refused save offers
+// Reload and Overwrite. Not UTF-8: read-only. Served by the test, so
+// nothing is written.
 test('a text file can be edited and saved', async ({ page }) => {
+  const touch = await page.evaluate(() => matchMedia('(pointer: coarse)').matches)
   const s = await openSession(page, (l) => l[0])
   const name = 'madetest-notes.md'
   let disk = { body: '# Notes\n\nfirst line\n', tag: '"v1"', mtime: '2026-11-09T00:00:00Z' }
@@ -645,18 +648,29 @@ test('a text file can be edited and saved', async ({ page }) => {
   await page.reload()
   const head = page.locator('.file-head')
   await expect(page.locator('.file-md')).toContainText('first line')
-  await head.getByRole('button', { name: 'Edit' }).click()
+  if (touch) {
+    await expect(head.getByRole('button', { name: 'Source' })).toBeVisible()
+    await head.getByRole('button', { name: 'Edit' }).click()
+  } else {
+    await expect(head.getByRole('button', { name: 'Edit' })).toHaveCount(0)
+    await head.getByRole('button', { name: 'Source' }).click()
+  }
   const content = page.locator('.cm-content')
   await expect(content).toContainText('first line')
-  await expect(head.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+  await expect(content).toHaveAttribute('contenteditable', 'true')
+  await expect(head.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0)
+  await expect(head.getByRole('link', { name: 'Download' })).toBeVisible()
   await content.click()
   await page.keyboard.press('ControlOrMeta+End')
   await page.keyboard.type('added\n')
   await expect(head).toContainText('•')
+  await expect(head.getByRole('button', { name: 'Revert' })).toBeVisible()
+  await expect(head.getByRole('button', { name: 'Preview' })).toHaveCount(0) // the typing stays on screen
   await page.keyboard.press('ControlOrMeta+s')
   await expect.poll(() => saves.length).toBe(1)
   expect(saves[0]).toEqual({ text: '# Notes\n\nfirst line\nadded\n', base: '"v1"' })
   await expect(head).not.toContainText('•')
+  await expect(head.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0)
 
   // Changed on disk with nothing typed: taken in.
   disk = { body: '# Notes\n\nfrom the agent\n', tag: '"agent1"', mtime: '2026-11-09T00:01:00Z' }
@@ -676,22 +690,32 @@ test('a text file can be edited and saved', async ({ page }) => {
   await expect(conflict).toHaveCount(0)
   expect(saves.at(-1)).toEqual({ text: '# Notes\n\nfrom the agent\nmine\n', base: '*' })
 
-  // Done with unsaved typing asks first.
+  // Revert drops the typing.
   await content.click()
-  await page.keyboard.type('x')
-  page.once('dialog', (d) => d.dismiss())
-  await head.getByRole('button', { name: 'Done' }).click()
-  await expect(head.getByRole('button', { name: 'Done' })).toBeVisible()
-  page.once('dialog', (d) => d.accept())
-  await head.getByRole('button', { name: 'Done' }).click()
-  await expect(head.getByRole('button', { name: 'Edit' })).toBeVisible()
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.type('scrap')
+  await head.getByRole('button', { name: 'Revert' }).click()
+  await expect(content).not.toContainText('scrap')
+  await expect(head).not.toContainText('•')
 
-  // Not UTF-8: shown, but no Edit.
+  // On a phone, Done with unsaved typing asks first.
+  if (touch) {
+    await content.click()
+    await page.keyboard.type('x')
+    page.once('dialog', (d) => d.dismiss())
+    await head.getByRole('button', { name: 'Done' }).click()
+    await expect(head.getByRole('button', { name: 'Done' })).toBeVisible()
+    page.once('dialog', (d) => d.accept())
+    await head.getByRole('button', { name: 'Done' }).click()
+    await expect(head.getByRole('button', { name: 'Edit' })).toBeVisible()
+  }
+
+  // Not UTF-8: shown read-only.
   const latin = 'f:madetest-latin.txt'
   await seedTabs(page, s.folder!, { ids: [s.id, latin], active: latin })
   await page.reload()
   await expect(page.locator('.cm-content')).toContainText('caf')
-  await expect(head.getByRole('link', { name: 'Save' })).toBeVisible() // the download one
+  await expect(page.locator('.cm-content')).toHaveAttribute('contenteditable', 'false')
   await expect(head.getByRole('button', { name: 'Edit' })).toHaveCount(0)
 })
 
@@ -1624,16 +1648,25 @@ test('background tasks after a turn still show as work', async ({ page }) => {
   await expect(icon).toHaveAttribute('data-state', 'idle')
 })
 
-// A newer release shows under the folder list once the server says so (a
-// release event; the snapshot after a reconnect too), with the line to run
-// on the computer, so the phone learns of it without a terminal.
-test('a newer release is announced under the folder list', async ({ page }, info) => {
+// The build shows under the folder list; a newer release replaces it once
+// the server says so (a release event; the snapshot after a reconnect
+// too): installing by itself once the server has started on it, else the
+// line to run on the computer (the test server is not a release build, so
+// it leaves updates to the person), so the phone learns of it without a
+// terminal.
+test('the version and a newer release show under the folder list', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'the explorer is a drawer on a phone')
   await openSession(page, (l) => l[0])
   const play = (ev: object) => page.evaluate((ev) => (window as any).dakort.stream.onEvent(ev), ev)
-  await expect(page.locator('.notice.release')).toHaveCount(0)
-  await play({ type: 'release', latest: 'v9.9.9' })
   const notice = page.locator('.notice.release')
-  await expect(notice).toContainText('v9.9.9 is out')
+  await expect(notice).toContainText('Dakort ')
+  await expect(notice).not.toContainText('is out')
+  await play({ type: 'release', latest: 'v9.9.9' })
+  await expect(notice).toContainText('v9.9.9')
+  await expect(notice).toContainText('is out')
+  await expect(notice).toContainText('dakort update')
+  await play({ type: 'release', latest: 'v9.9.9', update: 'v9.9.9' })
+  await expect(notice).toContainText('installs itself once nothing is running')
+  await play({ type: 'release', latest: 'v9.9.9' })
   await expect(notice).toContainText('dakort update')
 })

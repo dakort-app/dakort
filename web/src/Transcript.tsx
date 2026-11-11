@@ -7,6 +7,7 @@ import { copyText } from './clip'
 import { CheckIcon, CopyIcon } from './icons'
 import { Markdown } from './Markdown'
 import { PromptText } from './PromptText'
+import { SignIn } from './SignIn'
 import { latestTitle, titles } from './thinking'
 import { answer, group, promptText, resultText, toolSummary, type Item, type Part } from './rows'
 import { dropPending, onCatchUp, onCollapse, setCacheLife, setContext, setLastReply, setReplyModel, setRowWindow, useStore, type Pending } from './store'
@@ -338,10 +339,7 @@ export function Transcript({ id }: { id: string }) {
       )}
       {!turn && ended?.error && <div className="notice error">{ended.error}</div>}
       {!turn && ended?.result?.signIn ? (
-        <div className="notice error">
-          {codex ? 'Codex' : 'Claude'} is not signed in on this machine. In a terminal, run <code>{codex ? 'codex' : 'claude'}</code>{' '}
-          once and sign in, then send again.
-        </div>
+        <SignIn cli={codex ? 'codex' : 'claude'} />
       ) : !turn && ended?.result && !ended.result.ok && !ended.result.interrupted && (
         <div className="notice error pre-line">{ended.result.errors?.join('\n') || ended.result.reason || 'The turn failed.'}</div>
       )}

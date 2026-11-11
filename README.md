@@ -248,13 +248,6 @@ token in the config folder and the logs in the cache folder, named
 `~/Library/Caches` on macOS, `~/.config` and `~/.cache` on Linux).
 Delete them by hand if you want nothing left.
 
-## LaTeX
-
-If you write LaTeX, the PDF opens beside the agent and re-renders as it
-recompiles, with SyncTeX both ways:
-
-<img src="docs/dakort-latex.gif" width="800" alt="Claude fixes two typos in a .tex file and recompiles; the PDF beside it updates">
-
 ## Building from source
 
 Go 1.27 and Node 22.
@@ -263,6 +256,13 @@ Go 1.27 and Node 22.
 cd web && npm ci && npm run build && cd ..
 go build ./cmd/dakort
 ```
+
+## LaTeX
+
+If you write LaTeX, the PDF opens beside the agent and re-renders as it
+recompiles, with SyncTeX both ways:
+
+<img src="docs/dakort-latex.gif" width="800" alt="Claude fixes two typos in a .tex file and recompiles; the PDF beside it updates">
 
 ## License
 

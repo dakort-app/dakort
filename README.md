@@ -156,12 +156,47 @@ is running. After an update through brew, winget or scoop, run
 
 ## What it needs
 
-- [Claude Code](https://claude.com/claude-code) or [Codex](https://github.com/openai/codex),
-  installed and signed in. Dakort drives the real CLIs. It has no keys of
-  its own.
-- [Tailscale](https://tailscale.com) on the computer and the phone, for
-  the phone. Without it, Dakort listens on the computer only, and picks
-  Tailscale up when it is installed later.
+Claude Code or Codex, or both. They are the agents; Dakort is the page
+around them and has no keys or accounts of its own. If you already use
+one of them in a terminal, there is nothing to do here: your sessions
+are already Dakort projects.
+
+### Claude Code
+
+Needs a Claude Pro, Max, Team or Enterprise plan, or an API key. The free
+plan does not include it. Install it with the command for your system,
+from [Anthropic's own page](https://code.claude.com/docs/en/setup):
+
+```
+curl -fsSL https://claude.ai/install.sh | bash      # macOS, Linux
+irm https://claude.ai/install.ps1 | iex             # Windows, in PowerShell
+```
+
+Then open a terminal in a project folder, run `claude`, and sign in in
+the browser window it opens. Say hello to it once. That folder is now a
+project in Dakort, with that session in it.
+
+### Codex
+
+Needs a ChatGPT Plus, Pro, Business, Edu or Enterprise plan, or an API
+key. From [OpenAI's own page](https://github.com/openai/codex):
+
+```
+curl -fsSL https://chatgpt.com/codex/install.sh | sh                                     # macOS, Linux
+powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"  # Windows
+```
+
+Then run `codex` in a project folder and choose "Sign in with ChatGPT".
+
+If you install an agent after Dakort, run `dakort setup` again so it
+finds it. The page also says which command to run if you send a message
+to an agent that is not installed.
+
+### Tailscale
+
+For the phone only. [Tailscale](https://tailscale.com) on the computer
+and the phone, as described under Install. Without it, Dakort listens on
+the computer only, and picks Tailscale up when it is installed later.
 
 ## How it works
 

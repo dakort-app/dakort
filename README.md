@@ -135,7 +135,7 @@ Tailscale account can see the computer at all.
 1. Install Tailscale on the computer and on the phone, from
    tailscale.com/download or the app store, and sign both in with the
    same account (a Google account, say).
-2. On the computer, tap the devices icon in Dakort, the small QR code
+2. In Dakort on the computer, tap the devices icon, the small QR code
    beside the moon. The first time it asks you to choose a password.
    Then it shows the computer's address and a QR code.
 3. Scan the code with the phone, or type the address on the other
@@ -280,9 +280,9 @@ again; it opens the page logged in.
 
 ### I forgot the password.
 
-Tap the devices icon on the computer and choose a new one. The old one
-is not asked for; being at the computer is the proof. Devices already
-logged in stay logged in.
+Tap the devices icon on any device that is logged in, then Change
+password. The old one is not asked for. Devices already logged in stay
+logged in.
 
 ### How do I uninstall it?
 

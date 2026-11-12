@@ -2,7 +2,8 @@ import { Fragment, useRef, useState, type ReactNode } from 'react'
 import { api, HTTPError, postJSON } from './api'
 import { releasesURL, useConfig } from './config'
 import { StreamDot } from './Home'
-import { MoonIcon, PlusIcon, SunIcon } from './icons'
+import { Devices } from './Devices'
+import { DevicesIcon, MoonIcon, PlusIcon, SunIcon } from './icons'
 import { busy, tasksTitle } from './live'
 import { followMoves, isUnread, sameFolder } from './local'
 import { OpenFolder } from './OpenFolder'
@@ -183,6 +184,7 @@ export function FolderList({ current, hide }: { current: string; hide?: ReactNod
   const build = useStore((s) => s.build)
   const [folded, setFolded] = useState(() => localStorage.getItem(foldedKey) === '1')
   const [all, setAll] = useState(false)
+  const [devices, setDevices] = useState(false)
   const fold = () => {
     setFolded(!folded)
     localStorage.setItem(foldedKey, folded ? '0' : '1')
@@ -216,6 +218,9 @@ export function FolderList({ current, hide }: { current: string; hide?: ReactNod
         </button>
         {folded && elsewhere && <ActivityDot st={elsewhere} />}
         <span className="grow" />
+        <button className="icon theme-btn" onClick={() => setDevices(true)} aria-label="Other devices" title="Other devices">
+          <DevicesIcon />
+        </button>
         <ThemeButton />
         <StreamDot />
         <button className="icon" onClick={pick} aria-label="Open project" title="Open project">
@@ -242,6 +247,7 @@ export function FolderList({ current, hide }: { current: string; hide?: ReactNod
       )}
       <VersionLine />
       {sheet}
+      {devices && <Devices onClose={() => setDevices(false)} />}
     </div>
   )
 }

@@ -19,14 +19,16 @@ import (
 )
 
 // A password instead of pasting the token: the login page takes it and
-// sets the same cookie the token link sets. The password is chosen once,
-// on the laptop itself (a request straight to the loopback address, not
+// sets the same cookie the token link sets. The password is chosen on the
+// computer itself (a request straight to the loopback address, not
 // through Tailscale Serve), so nobody else on the tailnet can claim it
-// first. Stored as PBKDF2-SHA256 with a random salt, never as text.
+// first: in the Other devices panel (devices.go), or on the login page
+// when the computer's own browser has no cookie. Stored as PBKDF2-SHA256
+// with a random salt, never as text.
 //
 //	GET  /login              the login page (or, with ?token=, the old link)
 //	POST /api/login          {password}: sets the cookie
-//	POST /api/setup          {password}: chooses the password; local only, once
+//	POST /api/setup          {password}: chooses the password; local only, once (the login page's way)
 
 const (
 	pbkdfIter   = 600_000 // OWASP's figure for PBKDF2-SHA256
@@ -181,7 +183,7 @@ func (s *Server) passwordSetup(w http.ResponseWriter, r *http.Request) {
 	case s.pw.isSet():
 		s.reply(w, http.StatusOK)(nil, &httpError{status: 409, msg: "a password is already set"})
 	case !direct(r):
-		s.reply(w, http.StatusOK)(nil, &httpError{status: 403, msg: "choose the password on the laptop itself, at http://127.0.0.1"})
+		s.reply(w, http.StatusOK)(nil, &httpError{status: 403, msg: "the password is chosen on the computer itself, at http://127.0.0.1"})
 	case len([]rune(req.Password)) < minPassword:
 		s.reply(w, http.StatusOK)(nil, &httpError{status: 400, msg: "use at least 8 characters"})
 	default:
@@ -201,7 +203,7 @@ func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
 		if direct(r) {
 			mode = "setup"
 		} else {
-			mode, note = "none", "No password yet. Choose one on the laptop: open http://127.0.0.1"+portOf(r)+"/ there."
+			mode, note = "none", "No password yet. On the computer, tap the devices icon in Dakort (beside the moon) and choose one."
 		}
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

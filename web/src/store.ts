@@ -39,6 +39,7 @@ export type State = {
   tabs: Record<string, string[]> // per folder (folderKey): its open tabs, shared by every device; absent until asked for
   latest: string // a newer release's tag, once the server has found one; '' until then
   build: string // the server's version, from the snapshot
+  files: number // bumped when this page changed a folder's files (an upload), so the explorer lists again
 }
 
 let state: State = {
@@ -58,6 +59,7 @@ let state: State = {
   tabs: {},
   latest: '',
   build: '',
+  files: 0,
 }
 const listeners = new Set<() => void>()
 
@@ -77,6 +79,8 @@ export function useStore<T>(pick: (s: State) => T): T {
 }
 
 export const getState = () => state
+
+export const filesChanged = () => set({ files: state.files + 1 })
 
 // Transcripts on screen register here to hear that their session's file
 // grew (or that events were missed, which means the same: catch up). uuid

@@ -18,14 +18,13 @@ import (
 	"github.com/dakort-app/dakort/internal/claude"
 	"github.com/dakort-app/dakort/internal/codex"
 	"github.com/dakort-app/dakort/internal/server"
-	"rsc.io/qr"
 )
 
 // dakort setup installs the server as a background service under the
 // user's own account, from login (a scheduled task on Windows, a launchd
 // agent on macOS, a systemd user unit on Linux), then says how to
-// reach it: the login link on this machine, the phone's address on the
-// tailnet as a QR code, and which CLIs it found. The service runs a copy
+// reach it: the login link on this machine, which it opens, and which
+// CLIs and whether Tailscale it found. The service runs a copy
 // of this binary from the install folder (bin/dakort), so a package
 // manager's update never writes over the running program.
 //
@@ -36,8 +35,9 @@ import (
 // service's own definition, needs the service stopped and registered
 // again, which waits for no turn to be running (or -force).
 //
-// The password is chosen in the browser, on this machine, the first time
-// the page opens (the login page asks); the phone then logs in with it.
+// No password here: the page's Other devices panel asks for one, on this
+// machine, the first time it is opened, and shows the phone's address and
+// a QR code from then on (internal/server/devices.go).
 type setupOpts struct {
 	port       int
 	force      bool
@@ -224,11 +224,15 @@ func report(o setupOpts, svc service, base, token string) {
 	}
 
 	login := fmt.Sprintf("%s/login?token=%s", base, token)
-	fmt.Printf("\nOn this machine: %s\n(the page asks you to choose a password the first time; the phone logs in with it)\n", login)
+	fmt.Printf("\nOn this machine: %s\n", login)
+	// The phone's address lives in the page (the devices icon beside the
+	// moon: it asks for a password the first time, then shows the address
+	// and a QR code), so nobody has to come back to this output for it.
+	const icon = "the devices icon in the page (beside the moon)"
 	if ts, err := tailscaleBin(); err != nil {
-		fmt.Println("\nNo Tailscale here: the app is on this machine only. Install Tailscale on this machine and the phone (https://tailscale.com/download), sign both in, and run dakort setup again for the phone's address.")
+		fmt.Printf("\nNo Tailscale here: the app is on this machine only. For a phone or another computer, install Tailscale on both (https://tailscale.com/download) and sign both in; %s then shows the address to open.\n", icon)
 	} else if name, _, err := tailscaleSelf(ts); err != nil || name == "" {
-		fmt.Printf("\nTailscale is installed but not up (%v); once it is, the phone reaches the app at http://<this machine's tailnet name>:%d/\n", err, o.port)
+		fmt.Printf("\nTailscale is installed but not up (%v); once it is, %s shows the address for a phone or another computer.\n", err, icon)
 	} else {
 		phone := fmt.Sprintf("http://%s:%d/", name, o.port)
 		if o.https {
@@ -239,53 +243,11 @@ func report(o setupOpts, svc service, base, token string) {
 				phone = fmt.Sprintf("https://%s:%d/", name, o.httpsPort)
 			}
 		}
-		fmt.Printf("\nOn the phone (with Tailscale signed in to the same account): %s\n", phone)
-		if lines, err := qrLines(phone); err == nil {
-			fmt.Println()
-			for _, l := range lines {
-				fmt.Println("  " + l)
-			}
-		}
+		fmt.Printf("\nFor a phone or another computer: %s shows this machine's address, %s, and a QR code.\n", icon, phone)
 	}
 	if !o.noBrowser {
 		openBrowser(login)
 	}
-}
-
-// qrLines draws a QR code for a terminal, two modules per line in block
-// characters, dark on a light background whatever the terminal's colours.
-func qrLines(text string) ([]string, error) {
-	c, err := qr.Encode(text, qr.M)
-	if err != nil {
-		return nil, err
-	}
-	const quiet = 2
-	n := c.Size + 2*quiet
-	black := func(x, y int) bool {
-		x, y = x-quiet, y-quiet
-		return x >= 0 && y >= 0 && x < c.Size && y < c.Size && c.Black(x, y)
-	}
-	var lines []string
-	for y := 0; y < n; y += 2 {
-		var b strings.Builder
-		b.WriteString("\x1b[30;47m")
-		for x := 0; x < n; x++ {
-			top, bottom := black(x, y), y+1 < n && black(x, y+1)
-			switch {
-			case top && bottom:
-				b.WriteString("█")
-			case top:
-				b.WriteString("▀")
-			case bottom:
-				b.WriteString("▄")
-			default:
-				b.WriteString(" ")
-			}
-		}
-		b.WriteString("\x1b[0m")
-		lines = append(lines, b.String())
-	}
-	return lines, nil
 }
 
 func openBrowser(url string) {

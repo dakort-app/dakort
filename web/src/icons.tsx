@@ -88,6 +88,16 @@ export const PlusIcon = () => (
   </svg>
 )
 
+// Other devices: a QR code, which is what the panel behind it shows.
+export const DevicesIcon = () => (
+  <svg {...base} aria-hidden="true">
+    <rect x="4" y="4" width="6" height="6" rx="1" />
+    <rect x="14" y="4" width="6" height="6" rx="1" />
+    <rect x="4" y="14" width="6" height="6" rx="1" />
+    <path d="M14 14h3v3h-3zM20 14v3M14 20h3M20 20h.01" />
+  </svg>
+)
+
 // The browser: on the model chip while a session has Chrome on.
 export const GlobeIcon = () => (
   <svg {...base} width={13} height={13} aria-hidden="true">

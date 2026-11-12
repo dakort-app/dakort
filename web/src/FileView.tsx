@@ -21,7 +21,7 @@ export const extOf = (path: string) => (path.split('.').pop() ?? '').toLowerCase
 // while on screen and reloads when either changes (Claude edits files
 // from this app, the terminal, or VS Code alike). PDFs watch themselves.
 
-export const fileURL = (kind: 'list' | 'raw' | 'stat' | 'open' | 'archive' | 'save', root: string, path: string) =>
+export const fileURL = (kind: 'list' | 'raw' | 'stat' | 'open' | 'archive' | 'save' | 'delete', root: string, path: string) =>
   `/api/files/${kind}?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`
 
 // DownloadButton downloads the file as it is on disk, to the laptop's

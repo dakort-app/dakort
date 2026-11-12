@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -69,23 +70,18 @@ func TestServiceDefinition(t *testing.T) {
 	}
 }
 
-// qrLines gives a square of block characters that scans as the text:
-// here only that it is a square with a quiet zone and nothing else.
-func TestQRLines(t *testing.T) {
-	lines, err := qrLines("http://laptop.example.ts.net:3002/")
-	if err != nil {
-		t.Fatal(err)
+// exposedHosts: a named address is itself; every interface becomes this
+// machine's own IPv4 addresses, each with the port.
+func TestExposedHosts(t *testing.T) {
+	if got := exposedHosts("192.168.1.20:3002"); len(got) != 1 || got[0] != "192.168.1.20:3002" {
+		t.Errorf("named: %v", got)
 	}
-	if len(lines) < 10 {
-		t.Fatalf("%d lines", len(lines))
-	}
-	for i, l := range lines {
-		l = strings.TrimSuffix(strings.TrimPrefix(l, "\x1b[30;47m"), "\x1b[0m")
-		if n := len([]rune(l)); n != 2*len(lines) && n != 2*len(lines)-1 {
-			t.Errorf("line %d has %d modules for %d lines", i, n, len(lines))
-		}
-		if !strings.HasPrefix(l, "  ") || !strings.HasSuffix(l, "  ") {
-			t.Errorf("line %d lacks the quiet zone: %q", i, l)
+	for _, all := range []string{":3002", "0.0.0.0:3002"} {
+		for _, h := range exposedHosts(all) {
+			host, port, err := net.SplitHostPort(h)
+			if err != nil || port != "3002" || net.ParseIP(host) == nil || net.ParseIP(host).IsLoopback() || net.ParseIP(host).IsUnspecified() {
+				t.Errorf("%s gave %q", all, h)
+			}
 		}
 	}
 }

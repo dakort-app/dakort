@@ -138,7 +138,8 @@ func (s *Server) restoreSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // emptyTrash removes entries older than trashKeep. Only names matching
-// trashName, directly inside the trash folder, are ever removed.
+// trashName (a session) or fileTrashName (a file, filetrash.go), directly
+// inside the trash folder, are ever removed.
 func emptyTrash(trash string) {
 	if trash == "" {
 		return
@@ -149,15 +150,23 @@ func emptyTrash(trash string) {
 	}
 	for _, e := range ents {
 		name := e.Name()
-		if !e.IsDir() || !trashName.MatchString(name) {
+		var prefix string
+		switch {
+		case !e.IsDir():
+			continue
+		case trashName.MatchString(name):
+			prefix = "made-trash-"
+		case fileTrashName.MatchString(name):
+			prefix = "made-filetrash-"
+		default:
 			continue
 		}
-		ms, err := strconv.ParseInt(strings.SplitN(strings.TrimPrefix(name, "made-trash-"), "-", 2)[0], 10, 64)
+		ms, err := strconv.ParseInt(strings.SplitN(strings.TrimPrefix(name, prefix), "-", 2)[0], 10, 64)
 		if err != nil || time.Since(time.UnixMilli(ms)) < trashKeep {
 			continue
 		}
 		dir := filepath.Join(trash, name)
-		if filepath.Dir(dir) != filepath.Clean(trash) || !strings.HasPrefix(filepath.Base(dir), "made-trash-") {
+		if filepath.Dir(dir) != filepath.Clean(trash) || !strings.HasPrefix(filepath.Base(dir), prefix) {
 			continue
 		}
 		if err := os.RemoveAll(dir); err != nil {

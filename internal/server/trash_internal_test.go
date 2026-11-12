@@ -15,7 +15,9 @@ func TestEmptyTrash(t *testing.T) {
 	const id = "11111111-2222-4333-8444-555555555555"
 	old := strconv.FormatInt(time.Now().Add(-31*24*time.Hour).UnixMilli(), 10)
 	recent := strconv.FormatInt(time.Now().Add(-time.Hour).UnixMilli(), 10)
-	for _, name := range []string{"made-trash-" + old + "-" + id, "made-trash-" + recent + "-" + id, "not-ours-" + old, "made-trash-" + old + "-x"} {
+	const rnd = "0123456789abcdef"
+	for _, name := range []string{"made-trash-" + old + "-" + id, "made-trash-" + recent + "-" + id, "not-ours-" + old, "made-trash-" + old + "-x",
+		"made-filetrash-" + old + "-" + rnd, "made-filetrash-" + recent + "-" + rnd, "made-filetrash-" + old + "-xyz"} {
 		os.MkdirAll(filepath.Join(trash, name), 0o755)
 		os.WriteFile(filepath.Join(trash, name, "f"), []byte("x"), 0o644)
 	}
@@ -25,6 +27,9 @@ func TestEmptyTrash(t *testing.T) {
 		"made-trash-" + recent + "-" + id: true,
 		"not-ours-" + old:                 true,
 		"made-trash-" + old + "-x":        true,
+		"made-filetrash-" + old + "-" + rnd:    false,
+		"made-filetrash-" + recent + "-" + rnd: true,
+		"made-filetrash-" + old + "-xyz":       true,
 	} {
 		_, err := os.Stat(filepath.Join(trash, name))
 		if (err == nil) != want {

@@ -109,6 +109,7 @@ type Config struct {
 	Release    ReleaseConfig // the notice of a newer release (release.go); off unless On
 	WarmModels bool          // ask the CLIs for their model lists at start, for the picker
 	Version    string        // the build, told to every page in its snapshot (a page from an older build reloads itself)
+	Devices    func() Devices // where other devices reach this computer (devices.go); nothing known when nil
 }
 
 type Server struct {
@@ -138,6 +139,7 @@ type Server struct {
 	signins signIns      // sign-ins run from the page (signin.go)
 
 	autoUpdate bool // newer releases are installed by this server itself (release.go); told to the page
+	devices    func() Devices // the Other devices panel's addresses (devices.go)
 
 	stop      chan struct{}
 	done      sync.WaitGroup
@@ -163,6 +165,7 @@ func New(c Config) *Server {
 	s.hub.build = c.Version
 	s.signins.env = c.CLIEnv
 	s.autoUpdate = c.Release.On && c.Release.Auto && c.Release.Update != nil && autoUpdates(c.Version)
+	s.devices = c.Devices
 	emptyTrash(c.Trash)
 	if c.Index != nil {
 		c.Index.SetMoved(s.moves.apply)
@@ -207,6 +210,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /login", s.login)
 	mux.HandleFunc("POST /api/login", s.passwordLogin)
 	mux.HandleFunc("POST /api/setup", s.passwordSetup)
+	mux.HandleFunc("GET /api/devices", s.devicesState)
+	mux.HandleFunc("GET /api/devices/qr", s.devicesQR)
+	mux.HandleFunc("POST /api/password", s.passwordChange)
 	mux.HandleFunc("GET /api/sessions", s.sessions)
 	mux.HandleFunc("GET /api/folders", s.folders)
 	mux.HandleFunc("POST /api/folders/open", s.openFolder)
@@ -222,6 +228,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/files/stat", s.statFile)
 	mux.HandleFunc("POST /api/files/open", s.openLocal)
 	mux.HandleFunc("POST /api/files/save", s.saveFile)
+	mux.HandleFunc("POST /api/files/upload", s.uploadFile)
+	mux.HandleFunc("POST /api/files/delete", s.deleteFile)
+	mux.HandleFunc("POST /api/files/restore", s.restoreFile)
 	mux.HandleFunc("GET /api/here", s.here)
 	mux.HandleFunc("GET /api/files/archive", s.archiveFile)
 	mux.HandleFunc("GET /api/files/synctex/view", s.syncView)

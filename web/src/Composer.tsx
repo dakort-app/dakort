@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type MutableRefObject } from 'react'
-import { postJSON } from './api'
+import { api, postJSON } from './api'
 import { attachNow, ready, type Attachment } from './images'
 import { noteProvider } from './local'
 import { cacheLifeMs, useConfig } from './config'
@@ -8,7 +8,7 @@ import { aliasOf, ModelPicker, type Choice } from './ModelPicker'
 import { SlashMenu, useSlashMenu, type Command } from './SlashMenu'
 import { ago } from './route'
 import { newPromptId, sendPrompt } from './send'
-import { ackedSession, addPending, collapse, dropPending, refreshLists, updatePending, useStore } from './store'
+import { ackedSession, addPending, collapse, dropPending, filesChanged, refreshLists, updatePending, useStore } from './store'
 import { tokens } from './Transcript'
 import type { Session } from './types'
 
@@ -178,17 +178,40 @@ export function Composer({ session, folder, onStarted, filesIn }: Props) {
       )
     }
   }
-  // A drop takes images and names what it left out.
+  // Any other file goes into the project folder, where the agent opens it
+  // with its own tools; the box gets its path, in backticks, to point at
+  // it. A taken name gets a number (upload.go), so the path says which.
+  const [uploading, setUploading] = useState<string[]>([])
+  const uploadFiles = async (files: File[]) => {
+    for (const f of files) {
+      setUploading((cur) => [...cur, f.name])
+      try {
+        const { path } = await api.upload(folder, f)
+        setText((cur) => (cur && !/\s$/.test(cur) ? cur + ' ' : cur) + '`' + path + '` ')
+        filesChanged()
+      } catch (e) {
+        setError(`Could not upload ${f.name}: ` + (e instanceof Error ? e.message : e))
+      } finally {
+        setUploading((cur) => {
+          const i = cur.indexOf(f.name)
+          return i < 0 ? cur : [...cur.slice(0, i), ...cur.slice(i + 1)]
+        })
+      }
+    }
+  }
+  // Images the page can draw go with the message (the model sees them);
+  // anything else, an SVG or a HEIC included, is uploaded.
+  const takeFiles = (files: File[]) => {
+    setError('')
+    const isImage = (f: File) => /^image\/(png|jpeg|gif|webp|bmp|avif)$/.test(f.type)
+    addFiles(files.filter(isImage))
+    const other = files.filter((f) => !isImage(f))
+    if (other.length) uploadFiles(other)
+  }
   useEffect(() => {
     if (!filesIn) return
     filesIn.current = (files) => {
-      const other = files.filter((f) => !f.type.startsWith('image/'))
-      setError(
-        other.length
-          ? `Only images can be attached; ${other.length === 1 ? (other[0].name || 'that file') + ' was' : other.length + ' files were'} left out.`
-          : '',
-      )
-      addFiles(files.filter((f) => f.type.startsWith('image/')))
+      takeFiles(files)
       box.current?.focus({ preventScroll: true })
     }
     return () => {
@@ -200,6 +223,11 @@ export function Composer({ session, folder, onStarted, filesIn }: Props) {
     const t = again ? again.text : text.trim()
     const imgs = again ? again.images : images
     if ((!t && !imgs.length) || busy) return
+    // Its path is not in the box yet, and the agent would not find the file.
+    if (uploading.length) {
+      setError('Wait for the upload to finish.')
+      return
+    }
     // While a turn runs the message waits on the server and goes when the
     // turn ends (queue.go), shown above the box meanwhile, not as sent.
     const queue = !!(id && turn)
@@ -383,6 +411,7 @@ export function Composer({ session, folder, onStarted, filesIn }: Props) {
           ))}
         </div>
       ) : null}
+      {uploading.length > 0 && <div className="notice faint small uploading">Uploading {uploading.join(', ')} to the project folder…</div>}
       {images.length > 0 && (
         <div className="attachments">
           {images.map((im, i) => (
@@ -422,25 +451,29 @@ export function Composer({ session, folder, onStarted, filesIn }: Props) {
             }, 0)
           }}
           onPaste={(e) => {
-            const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith('image/'))
+            const files = Array.from(e.clipboardData.files)
             if (files.length) {
               e.preventDefault()
-              addFiles(files)
+              takeFiles(files)
             }
           }}
         />
         <div className="composer-row">
-          <button className="icon" aria-label="Attach image" title="Attach image" onClick={() => file.current?.click()}>
+          <button
+            className="icon"
+            aria-label="Attach files"
+            title="Attach files: images go with the message, other files are uploaded to the project folder"
+            onClick={() => file.current?.click()}
+          >
             +
           </button>
           <input
             ref={file}
             type="file"
-            accept="image/*"
             multiple
             hidden
             onChange={(e) => {
-              if (e.target.files) addFiles(e.target.files)
+              if (e.target.files) takeFiles(Array.from(e.target.files))
               e.target.value = ''
             }}
           />

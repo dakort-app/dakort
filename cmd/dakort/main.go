@@ -126,6 +126,7 @@ func main() {
 	}
 	log.Printf("indexed %d sessions in %v", len(idx.List()), time.Since(start).Round(time.Millisecond))
 
+	_, port, _ := net.SplitHostPort(addrs[0])
 	var s *server.Server
 	s = server.New(server.Config{
 		Token:      token,
@@ -142,6 +143,7 @@ func main() {
 		Release:    server.ReleaseConfig{On: true, Auto: *autoUpdate && *service, Update: autoUpdater(addrs[0], *data)},
 		WarmModels: true,
 		Version:    version,
+		Devices:    devices(port, exposed),
 		Restart: func() {
 			s.Close()
 			os.Exit(restartCode)
@@ -166,7 +168,6 @@ func main() {
 		go listenLater(srv, a, token, tokenPath, *service)
 	}
 	if *tailnet {
-		_, port, _ := net.SplitHostPort(ln.Addr().String())
 		go listenTailnet(srv, port, append(addrs, exposed...))
 	}
 	log.Fatal(srv.Serve(ln))

@@ -59,6 +59,17 @@ export const api = {
   tabs: (folder: string) => getJSON<{ ids: string[] | null }>('/api/tabs?folder=' + encodeURIComponent(folder)),
   setTabs: (folder: string, ids: string[]) => postJSON('/api/tabs', { folder, ids }),
   mkdir: (path: string, name: string) => postJSON<{ path: string }>('/api/browse/mkdir', { path, name }),
+  // A file put into the folder (upload.go); the reply is where it landed,
+  // which differs from its name when that name was taken.
+  upload: async (root: string, file: File, dir = '') => {
+    const q = new URLSearchParams({ root, dir, name: file.name })
+    const r = await fetch('/api/files/upload?' + q, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: file,
+    })
+    return (await (await check(r)).json()) as { path: string }
+  },
   tail: (id: string, before?: number, n?: number) => {
     const q = new URLSearchParams()
     if (before !== undefined) q.set('before', String(before))
@@ -71,6 +82,19 @@ export const api = {
   signIn: (cli: string) => postJSON<SignInState>('/api/signin', { cli }),
   signInState: (cli: string) => getJSON<SignInState>('/api/signin?cli=' + cli),
   signInCode: (cli: string, code: string) => postJSON<SignInState>('/api/signin/code', { cli, code }),
+  // The Other devices panel (Devices.tsx): where this computer is reached
+  // from, and the password those devices use (chosen on the computer only).
+  devices: () => getJSON<DevicesState>('/api/devices'),
+  setPassword: (password: string) => postJSON('/api/password', { password }),
+}
+
+export type DevicesState = {
+  tailscale: 'up' | 'down' | 'none'
+  why?: string // down: what Tailscale said
+  addrs: { url: string; kind: 'tailnet' | 'https' | 'exposed' }[]
+  localUrl: string // this computer's own address, where the password is chosen
+  passwordSet: boolean
+  local: boolean // this page is on the computer itself
 }
 
 export type SignInState = {

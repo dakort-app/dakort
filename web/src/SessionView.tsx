@@ -79,7 +79,7 @@ export function SessionView({ id, session, folder, onStarted }: Props) {
       <Composer key={id || 'new'} session={session ?? (id ? ({ id } as Session) : undefined)} folder={folder} onStarted={onStarted} filesIn={filesIn} />
       {over && (
         <div className="drop-veil" aria-hidden="true">
-          <span>Drop images to attach</span>
+          <span>Drop to attach: images go with the message, other files into the project folder</span>
         </div>
       )}
     </div>

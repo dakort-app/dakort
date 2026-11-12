@@ -307,9 +307,20 @@ test('a tab title can be edited in place', async ({ page }, info) => {
 // whole (2576 px, 3.75 MP), even when Send comes before it has shrunk. The
 // send is caught here and refused, so no CLI runs: the image comes back.
 // Files dropped on the transcript attach as + does; a veil shows while
-// they are over the session, and anything not an image is named and left.
-test('files dropped on a session attach, images only', async ({ page }) => {
-  await openSession(page, (l) => l[0])
+// they are over the session. An image goes with the message; any other
+// file is uploaded to the project folder and its path, as the server
+// named it, goes in the box. The upload is caught here, so nothing is
+// written into a real project.
+test('files dropped on a session: images attach, other files upload', async ({ page }) => {
+  const s = await openSession(page, (l) => l[0])
+  // (A File body is not visible to a route; upload_test.go checks the bytes.)
+  let upload: { url: URL; type: string } | null = null
+  await page.route('**/api/files/upload?**', async (route) => {
+    upload = { url: new URL(route.request().url()), type: (await route.request().allHeaders())['content-type'] }
+    return route.fulfill({ json: { path: 'notes (2).txt' } })
+  })
+  const box = page.locator('.composer textarea')
+  await box.fill('madetest: read')
   const target = page.locator('.session .transcript')
   const dt = await page.evaluateHandle(async () => {
     const c = document.createElement('canvas')
@@ -326,9 +337,15 @@ test('files dropped on a session attach, images only', async ({ page }) => {
   await target.dispatchEvent('drop', { dataTransfer: dt })
   await expect(page.locator('.drop-veil')).toHaveCount(0)
   await expect(page.locator('.composer .attachment img')).toHaveCount(1)
-  await expect(page.locator('.composer .notice.error')).toContainText('notes.txt was left out')
+  await expect(box).toHaveValue('madetest: read `notes (2).txt` ')
+  expect(upload).not.toBeNull()
+  const u = upload!
+  expect(u.url.searchParams.get('root')).toBe(s.folder)
+  expect(u.url.searchParams.get('name')).toBe('notes.txt')
+  expect(u.type).toBe('application/octet-stream')
+  await expect(page.locator('.composer .notice.error')).toHaveCount(0)
   await page.locator('.composer .attachment .tab-x').click()
-  await page.locator('.composer .notice.error').click()
+  await box.fill('')
 })
 
 test('a pasted screenshot shows at once and goes as a sharp PNG', async ({ page }) => {
@@ -573,6 +590,60 @@ test('the explorer sorts by date or by name', async ({ page }, info) => {
   await page.screenshot({ path: 'test-results/explorer-sort.png' })
   await panel.locator('.files-sort').getByRole('button', { name: 'Recent' }).click()
   await expect(panel.locator('.files-sort .chip-btn.on')).toHaveText('Recent')
+})
+
+// A right-click on a file asks before deleting it; Undo puts it back. The
+// listing gets a made-up file and the delete and restore are caught, so
+// nothing in the real project is touched (filetrash_test.go moves real
+// files). A folder's right-click asks nothing.
+test('a file is deleted from the explorer, with Undo', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'the explorer is a drawer on a phone; a long press there, same code')
+  const name = 'madetest-gone.txt'
+  const entry = 'made-filetrash-1-0123456789abcdef'
+  let deleted = false
+  const asked: string[] = []
+  await page.route(/\/api\/files\/list\?/, async (route) => {
+    const u = new URL(route.request().url())
+    if (u.searchParams.get('path') !== '') return route.fallback()
+    const r = await route.fetch()
+    const list = await r.json()
+    return route.fulfill({ json: deleted ? list : [...list, { name, size: 5, mtime: new Date().toISOString() }] })
+  })
+  await page.route(/\/api\/files\/(delete|restore)/, (route) => {
+    const u = new URL(route.request().url())
+    if (u.pathname.endsWith('/delete')) {
+      asked.push('delete ' + u.searchParams.get('path'))
+      deleted = true
+      return route.fulfill({ json: { trash: entry } })
+    }
+    asked.push('restore ' + route.request().postDataJSON().trash)
+    deleted = false
+    return route.fulfill({ json: { path: name } })
+  })
+  await openSession(page, (l) => l[0])
+  const panel = page.locator('.explorer-panel')
+  const row = panel.locator('.tree-row', { hasText: name })
+  await row.click({ button: 'right' })
+  const ask = page.getByRole('dialog', { name: 'Delete file' })
+  await expect(ask).toContainText(`Delete ${name}?`)
+  // Keep it: nothing is sent.
+  await ask.getByRole('button', { name: 'Keep it' }).click()
+  await expect(ask).toHaveCount(0)
+  expect(asked).toEqual([])
+  await row.click({ button: 'right' })
+  await ask.getByRole('button', { name: 'Delete' }).click()
+  await expect(page.locator('.toast')).toContainText(`Deleted ${name}`)
+  await expect(row).toHaveCount(0)
+  await page.screenshot({ path: 'test-results/explorer-deleted.png' })
+  await page.locator('.toast').getByRole('button', { name: 'Undo' }).click()
+  await expect(row).toHaveCount(1)
+  expect(asked).toEqual(['delete ' + name, 'restore ' + entry])
+  // A folder is not offered.
+  const folder = panel.locator('.tree-row:has(.folder-icon)').first()
+  if (await folder.count()) {
+    await folder.click({ button: 'right' })
+    await expect(ask).toHaveCount(0)
+  }
 })
 
 // A CSV opens as a table: the header stays at the top while the rows
@@ -1668,4 +1739,56 @@ test('a newer release is announced under the folder list; the build is in the sh
   const notice = page.locator('.notice.release')
   await expect(notice).toContainText('v9.9.9 is out')
   await expect(notice).toContainText('dakort update')
+})
+
+// The Other devices panel (the icon beside the moon): on the computer the
+// first opening asks for a password, then it shows the address and a QR
+// code with a Change password link; Tailscale off is said in the panel.
+// The server's answers are played here, so the check does not depend on
+// this machine's Tailscale.
+test('the devices panel asks for a password once, then shows the address and a code', async ({ page }, info) => {
+  await openSession(page, (l) => l[0])
+  const addr = 'http://laptop.example.ts.net:3003/'
+  let state = { tailscale: 'up', addrs: [{ url: addr, kind: 'tailnet' }], localUrl: 'http://127.0.0.1:3003/', passwordSet: false, local: true }
+  await page.route('**/api/devices', (route) => route.fulfill({ json: state }))
+  await page.route('**/api/devices/qr?**', (route) => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2"><rect width="1" height="1"/></svg>' }))
+  const chosen: string[] = []
+  await page.route('**/api/password', (route) => {
+    chosen.push(route.request().postDataJSON().password)
+    state = { ...state, passwordSet: true }
+    route.fulfill({ json: {} })
+  })
+  const open = async () => {
+    // The drawer, on a phone; it stays open once the sheet closes.
+    const show = page.getByRole('button', { name: 'Show the sidebar' })
+    if (info.project.name !== 'desktop' && (await show.isVisible())) await show.click()
+    await page.getByRole('button', { name: 'Other devices' }).click()
+    await expect(page.locator('.sheet')).toContainText('Other devices')
+  }
+  await open()
+  const sheet = page.locator('.sheet')
+  await expect(sheet).toContainText('Choose a password')
+  await sheet.getByLabel('Password', { exact: true }).fill('correct horse')
+  await sheet.getByLabel('The same again').fill('correct horsE')
+  await sheet.getByRole('button', { name: 'Set password' }).click()
+  await expect(sheet).toContainText('differ')
+  await sheet.getByLabel('The same again').fill('correct horse')
+  await sheet.getByRole('button', { name: 'Set password' }).click()
+  expect(chosen).toEqual(['correct horse'])
+  await expect(sheet).toContainText('scan this')
+  await expect(sheet.locator('.devices-addr').first()).toHaveText(addr)
+  await expect(sheet.locator('.devices-addr').first()).toHaveAttribute('target', '_blank')
+  await expect(sheet.locator('img.devices-qr')).toHaveAttribute('src', '/api/devices/qr?url=' + encodeURIComponent(addr))
+  await sheet.getByRole('button', { name: 'Change password' }).click()
+  await expect(sheet).toContainText('A new password')
+  await sheet.getByRole('button', { name: 'Cancel' }).click()
+  await expect(sheet).toContainText('scan this')
+  await sheet.getByRole('button', { name: 'Close' }).click()
+  await expect(page.locator('.sheet')).toHaveCount(0)
+
+  // Tailscale off: said in the panel, no address.
+  state = { ...state, tailscale: 'down', addrs: [] }
+  await open()
+  await expect(sheet).toContainText('not running')
+  await expect(sheet.locator('.devices-addr')).toHaveCount(0)
 })

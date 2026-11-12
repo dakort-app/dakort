@@ -186,10 +186,16 @@ Needs a Claude Pro, Max, Team or Enterprise plan, or an API key. The free
 plan does not include it. Install it with the command for your system,
 from [Anthropic's own page](https://code.claude.com/docs/en/setup):
 
-```
-curl -fsSL https://claude.ai/install.sh | bash      # macOS, Linux
+macOS and Linux:
 
-irm https://claude.ai/install.ps1 | iex             # Windows, in PowerShell
+```
+curl -fsSL https://claude.ai/install.sh | bash
+```
+
+Windows, in PowerShell:
+
+```
+irm https://claude.ai/install.ps1 | iex
 ```
 
 Then open a terminal in a project folder, run `claude`, and sign in in
@@ -201,10 +207,16 @@ project in Dakort, with that session in it.
 Needs a ChatGPT Plus, Pro, Business, Edu or Enterprise plan, or an API
 key. From [OpenAI's own page](https://github.com/openai/codex):
 
-```
-curl -fsSL https://chatgpt.com/codex/install.sh | sh                                     # macOS, Linux
+macOS and Linux:
 
-powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"  # Windows
+```
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+```
+
+Windows, in PowerShell:
+
+```
+powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
 ```
 
 Then run `codex` in a project folder and choose "Sign in with ChatGPT".

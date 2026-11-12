@@ -80,14 +80,6 @@ scoop install dakort
 dakort setup
 ```
 
-With winget, once Microsoft has reviewed the package (some days after a
-release):
-
-```
-winget install dakort
-dakort setup
-```
-
 Or unzip the Windows archive from the
 [release page](https://github.com/dakort-app/dakort/releases) anywhere
 and run `dakort setup` from there. SmartScreen warns the first time; the
@@ -133,7 +125,8 @@ Tailscale account can see the computer at all.
    computer, and log in with the password, once per device.
 
 The icon is always there, for the address again or a new password. If
-Tailscale is off or missing, the panel says so.
+Tailscale is off or missing, the panel says so. Without it, Dakort is on
+the computer only, and picks Tailscale up when it is installed later.
 
 The connection is encrypted by Tailscale itself; the page
 goes over plain HTTP inside it. For HTTPS on the tailnet, with the lock
@@ -160,7 +153,7 @@ once. Then, when the page says a release is out:
 dakort update
 ```
 
-After an update through brew, winget or scoop, run `dakort setup` again
+After an update through brew or scoop, run `dakort setup` again
 instead, so the service takes the new copy.
 
 ## What it needs
@@ -203,11 +196,7 @@ If you install an agent after Dakort, run `dakort setup` again so it
 finds it. The page also says which command to run if you send a message
 to an agent that is not installed.
 
-### Tailscale
-
-For your other devices only. [Tailscale](https://tailscale.com) on the computer
-and on each of them, as described under Install. Without it, Dakort listens on
-the computer only, and picks Tailscale up when it is installed later.
+Tailscale is needed only for your other devices, as under Install.
 
 ## How it works
 

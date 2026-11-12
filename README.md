@@ -106,18 +106,18 @@ dakort setup
 
 ### What setup does
 
-Installs Dakort as a service that starts when you log in. Finds the
-Claude Code and Codex CLIs. Shows your phone's address as a QR code and
-opens the page, which asks you to choose a password.
+Installs Dakort as a service that starts when you log in, finds the
+Claude Code and Codex CLIs, and opens the page in your browser, logged
+in. That is all; there is nothing to choose.
 
 `dakort setup -uninstall` removes the service; your sessions stay. On
 Windows, `dakort setup -at-boot` runs it before anyone logs in, for a
 machine nobody signs in to. Codex's shell commands do not work there; its
 sandbox needs a signed-in desktop.
 
-### The phone or other device
+### Your other devices
 
-Dakort reaches your phone or other device through [Tailscale](https://tailscale.com), a
+Dakort reaches your phone, or another computer, through [Tailscale](https://tailscale.com), a
 private network between your own devices. It is free for personal use
 and needs no router settings, no port forwarding and no public address.
 Nothing is exposed to the internet; only devices signed in to your
@@ -126,18 +126,25 @@ Tailscale account can see the computer at all.
 1. Install Tailscale on the computer and on the phone, from
    tailscale.com/download or the app store, and sign both in with the
    same account (a Google account, say).
-2. Run `dakort setup` on the computer. It prints the URL to open on the phone or other device and
-   a QR code.
-3. Scan the code with the phone, or type the address. The page asks for
-   the password you chose on the computer, once per device.
+2. On the computer, tap the devices icon in Dakort, the small QR code
+   beside the moon. The first time it asks you to choose a password.
+   Then it shows the computer's address and a QR code.
+3. Scan the code with the phone, or type the address on the other
+   computer, and log in with the password, once per device.
 
-If Tailscale came after Dakort, run `dakort setup` again and it picks the
-tailnet up.
+The icon is always there, for the address again or a new password. If
+Tailscale is off or missing, the panel says so.
 
 The connection is encrypted by Tailscale itself; the page
 goes over plain HTTP inside it. For HTTPS on the tailnet, with the lock
 icon, `dakort setup -https` puts it behind Tailscale Serve, which needs
 HTTPS certificates enabled in your Tailscale admin console.
+
+**Without Tailscale.** On a home network you can instead run
+`dakort setup -expose 192.168.1.20:3002` with the computer's own address
+on that network. Anyone on the network then gets the login page, and the
+password is all that stands between them and the computer, so Tailscale
+is the better way. Five wrong passwords close the login for five minutes.
 
 ### Updating
 
@@ -198,8 +205,8 @@ to an agent that is not installed.
 
 ### Tailscale
 
-For the phone/other device only. [Tailscale](https://tailscale.com) on the computer
-and the phone/other device, as described under Install. Without it, Dakort listens on
+For your other devices only. [Tailscale](https://tailscale.com) on the computer
+and on each of them, as described under Install. Without it, Dakort listens on
 the computer only, and picks Tailscale up when it is installed later.
 
 ## How it works
@@ -210,9 +217,10 @@ the CLI for one turn in the project's folder, `claude -p --resume` or
 Codex's app-server, and streams the result.
 
 It listens on this computer and your Tailscale addresses only; other
-addresses are refused unless you ask. The page is behind a password you
-choose, or the token link setup prints on the computer. The only outward
-request is to GitHub's releases every six hours, for the update notice.
+addresses are refused unless you ask. On the computer the page logs in by
+a token kept in a file only you can read; other devices log in with the
+password you choose in the devices panel. The only outward request is to
+GitHub's releases every six hours, for updates.
 
 ## Questions
 
@@ -245,6 +253,18 @@ The page offers the sign-in. It shows the agent's own sign-in link, and
 either takes the code the Claude page gives you or shows the code the
 Codex page asks for. Both work from the phone. Signing in from a
 terminal on the computer works too, as always.
+
+### The page on the computer asks me to log in. Why?
+
+The browser lost its cookie (a cleared history, a new browser). If you
+have chosen a password, log in with it. If not, run `dakort setup`
+again; it opens the page logged in.
+
+### I forgot the password.
+
+Tap the devices icon on the computer and choose a new one. The old one
+is not asked for; being at the computer is the proof. Devices already
+logged in stay logged in.
 
 ### How do I uninstall it?
 

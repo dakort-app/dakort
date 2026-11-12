@@ -65,6 +65,15 @@ else to install. The CLIs run only while a turn runs.
 
 ### macOS
 
+With [Homebrew](https://brew.sh). If you do not have it, this line from
+brew.sh installs it first, in Terminal:
+
+```
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+Then:
+
 ```
 brew install dakort-app/tap/dakort
 dakort setup
@@ -72,7 +81,15 @@ dakort setup
 
 ### Windows
 
-With [Scoop](https://scoop.sh):
+With [Scoop](https://scoop.sh). If you do not have it, these two lines
+from scoop.sh install it first, in PowerShell, no administrator rights:
+
+```
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
+```
+
+Then:
 
 ```
 scoop bucket add dakort https://github.com/dakort-app/scoop-bucket

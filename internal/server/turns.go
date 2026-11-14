@@ -118,14 +118,19 @@ type turn struct {
 	promptID string
 	idle     bool // an idle compaction, not a turn someone sent
 	proc     process
-	open     bool            // a turn is announced and its done not yet published
-	unechoed bool            // a prompt was sent and the CLI has not echoed it yet
-	inits    int             // turns the process has started; settle tells a new one by it
-	slot     bool            // holds one of the runner's slots (a held process does not)
-	closing  bool            // the result is in; the process is exiting
-	held     bool            // between turns, kept alive for its background tasks
-	stopNext bool            // a stop came before the CLI took the prompt up: interrupt at its init
-	tasks    []agent.Task    // the background tasks running now
+	open     bool         // a turn is announced and its done not yet published
+	unechoed bool         // a prompt was sent and the CLI has not echoed it yet
+	inits    int          // turns the process has started; settle tells a new one by it
+	slot     bool         // holds one of the runner's slots (a held process does not)
+	closing  bool         // the result is in; the process is exiting
+	held     bool         // between turns, kept alive for its background tasks
+	stopNext bool         // a stop came before the CLI took the prompt up: interrupt at its init
+	tasks    []agent.Task // the background tasks running now
+	// The process has run a background task. An ended task's notice can
+	// start a turn seconds after the task list went empty, even after a
+	// turn in between, so such a process is held after every result and
+	// closed only once it has stayed quiet (closeIfIdle).
+	hadTasks bool
 	st       sessionSettings // what the process was started with or switched to
 	exited   chan struct{}   // closed once the turn is fully over
 	perms    map[string]bool
@@ -667,6 +672,9 @@ func (r *runner) run(t *turn, proc process, msg agent.Message) {
 			}
 		case agent.KindTasks:
 			r.mu.Lock()
+			if len(ev.Tasks) > 0 {
+				t.hadTasks = true
+			}
 			t.tasks = ev.Tasks
 			linger := t.held && len(t.tasks) == 0
 			r.mu.Unlock()
@@ -774,10 +782,17 @@ func (r *runner) run(t *turn, proc process, msg agent.Message) {
 // background tasks (giving its slot back), else marked closing; it says
 // which. Called with mu held.
 func (r *runner) holdOrClose(t *turn) (keep bool) {
-	keep = len(t.tasks) > 0 && !r.stopped
+	// A process that has had tasks is held too, with none left: closing
+	// its stdin while a notice is still on the way leaves the CLI to start
+	// the notice's turn regardless, and the close grace killed it partway
+	// (exit status 1, no stderr; twice on 2026-11-13).
+	keep = (len(t.tasks) > 0 || t.hadTasks) && !r.stopped
 	if keep {
 		t.held = true
 		r.dropSlot(t)
+		if len(t.tasks) == 0 {
+			go r.closeIfIdle(t, t.proc) // in case no turn follows after all
+		}
 	} else {
 		t.closing = true
 	}
@@ -811,9 +826,13 @@ func (r *runner) settle(t *turn, proc process, inits int) {
 // has started in it meanwhile (the CLI normally wakes once more to say the
 // last task ended, and that turn's result closes it instead).
 func (r *runner) closeIfIdle(t *turn, proc process) {
+	r.mu.Lock()
+	inits := t.inits
+	r.mu.Unlock()
 	time.Sleep(heldLinger)
 	r.mu.Lock()
-	idle := t.held && !t.open && len(t.tasks) == 0
+	// A turn since leaves the closing to the timer its own result starts.
+	idle := t.held && !t.open && len(t.tasks) == 0 && t.inits == inits
 	if idle {
 		t.held, t.closing = false, true
 	}

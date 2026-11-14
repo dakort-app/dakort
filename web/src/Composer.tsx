@@ -57,6 +57,11 @@ const draftKey = (key: string) => 'dakort.draft:' + key
 // on the way back. (Too big for localStorage, so a reload still loses them.)
 const draftImages = new Map<string, Attachment[]>()
 
+// The model a new session was sent with. Its pane mounts a fresh Composer
+// before the session list knows the session, and that one would show the
+// default (Opus) until the list caught up, though the turn ran the pick.
+const startedModel = new Map<string, string>()
+
 // On a phone, Return makes a new line; on a keyboard it sends.
 const coarse = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
 
@@ -84,7 +89,7 @@ export function Composer({ session, folder, onStarted, filesIn }: Props) {
   const [images, setImages] = useState<Attachment[]>(() => draftImages.get(key) ?? [])
   const used = session?.used
   const fromSession = (): Choice => ({
-    model: (used?.model ? aliasOf(used.model) : '') || session?.model || '',
+    model: (used?.model ? aliasOf(used.model) : '') || session?.model || startedModel.get(id) || '',
     effort: session?.effort ?? '',
     ultracode: !!session?.ultracode,
     chrome: !!session?.chrome,
@@ -283,6 +288,7 @@ export function Composer({ session, folder, onStarted, filesIn }: Props) {
       updatePending(promptId, { session: r.session })
       if (!id) {
         noteProvider(r.session, provider)
+        if (choice.model) startedModel.set(r.session, choice.model)
         onStarted?.(r.session)
       }
       refreshLists()

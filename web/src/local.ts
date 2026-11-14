@@ -161,10 +161,13 @@ export const flat = (t: Tabs): string[] => [...t.ids, ...(t.right?.ids ?? [])]
 // reason to close its tab), adds sessions with a turn running or finished
 // work not seen (work started in a terminal, or a session nobody has open,
 // shows up on its own) at the front, where a phone shows them, newest
-// first, and opens the folder's latest session when no tab is left (or a
-// new one in a folder with none). sessions is the folder's, newest first.
-// A tab closed by hand stays closed: closing marks the session read, so
-// only new activity brings it back.
+// first, and leaves a new-session tab when no tab is left. (It used to
+// open the folder's latest session instead; "latest" is the transcript's
+// mtime, which an idle compaction or another device bumps, so the session
+// that appeared looked random, and opening it marked it read unasked.)
+// sessions is the folder's, newest first. A tab closed by hand stays
+// closed: closing marks the session read, so only new activity brings it
+// back.
 export function tabsFor(t: Tabs, sessions: Session[], running: (id: string) => boolean = () => false, exists?: (id: string) => boolean): Tabs {
   const known = new Set(sessions.map((s) => s.id))
   const there = exists ?? ((id: string) => known.has(id))
@@ -182,7 +185,7 @@ export function tabsFor(t: Tabs, sessions: Session[], running: (id: string) => b
     leftActive = t.right!.active
     right = []
   }
-  if (!ids.length) ids = sessions.length ? [sessions[0].id] : [NEW]
+  if (!ids.length) ids = [NEW]
   const out: Tabs = { ids, active: ids.includes(leftActive) ? leftActive : (ids[0] ?? '') }
   if (right.length) {
     out.right = { ids: right, active: right.includes(t.right!.active) ? t.right!.active : right[0] }

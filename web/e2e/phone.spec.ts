@@ -550,6 +550,27 @@ test('an effort and Chrome pick survive a reload', async ({ page }) => {
   await expect(page.locator('.picker-panel [aria-label="Effort Default"]')).toHaveClass(/\bon\b/)
 })
 
+// A new session's pane mounts a fresh composer before the session list
+// knows the session; it showed the default model (Opus) though the turn
+// ran the pick. The send is answered here, so no CLI runs.
+test('a new session keeps the model it was sent with', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('dakort.provider', 'claude'))
+  await openSession(page, (l) => l.filter((x) => x.provider !== 'codex' && !x.heldBy && x.size > 50_000).sort((a, b) => a.size - b.size)[0])
+  const fake = '00000000-0000-4000-8000-00000000f4b1'
+  await page.route('**/api/sessions', (route) =>
+    route.request().method() === 'POST' ? route.fulfill({ json: { session: fake, promptId: route.request().postDataJSON().promptId } }) : route.fallback(),
+  )
+  await page.locator('button[aria-label="New session"]').first().click()
+  await page.locator('.composer .chip-btn').click()
+  await page.locator('.picker-panel .picker-row', { hasText: 'Fable' }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.composer .chip-btn')).toContainText('Fable')
+  await page.locator('.composer textarea').fill('hello')
+  await page.locator('.composer textarea').press('Enter')
+  await page.waitForTimeout(1000)
+  await expect(page.locator('.composer .chip-btn')).toContainText('Fable')
+})
+
 // A Codex thread reads like a Claude session: prompts, replies, tool rows,
 // and a Codex chip in the composer with GPT models in the picker; no
 // prompt-cache clock (Claude's), no slash menu.

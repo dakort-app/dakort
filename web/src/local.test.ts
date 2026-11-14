@@ -60,6 +60,14 @@ describe('tabsFor', () => {
     expect(t.ids).toEqual(['b', 'a', 'x'])
   })
 
+  it('leaves a new-session tab when the last tab closes, not the latest session', () => {
+    const latest = session('latest', at(5), at(5)) // read; its mtime moved for reasons of its own
+    expect(tabsFor({ ids: [], active: '' }, [latest, session('older', at(1), at(1))])).toEqual({ ids: ['new'], active: 'new' })
+    expect(tabsFor({ ids: [], active: '' }, [])).toEqual({ ids: ['new'], active: 'new' })
+    // Unread or running work still comes in on its own.
+    expect(tabsFor({ ids: [], active: '' }, [session('fresh', at(6))]).ids).toEqual(['fresh'])
+  })
+
   it('opens a running session, even one seen', () => {
     const s = session('run', at(3), at(3))
     expect(tabsFor({ ids: [], active: '' }, [s], (id) => id === 'run').ids).toEqual(['run'])
@@ -83,7 +91,8 @@ describe('tabsFor', () => {
     const seen = session('claude', at(3), at(3))
     const t = tabsFor({ ids: ['claude'], active: 'claude' }, [], () => false, (id) => id === 'claude')
     expect(t).toEqual({ ids: ['claude'], active: 'claude' })
-    expect(tabsFor({ ids: ['gone'], active: 'gone' }, [seen], () => false, (id) => id === 'claude').ids).toEqual(['claude'])
+    // A gone tab goes; a read session in the folder does not take its place.
+    expect(tabsFor({ ids: ['gone'], active: 'gone' }, [seen], () => false, (id) => id === 'claude').ids).toEqual(['new'])
   })
 })
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { getJSON, postJSON } from './api'
+import { getJSON, HTTPError, postJSON } from './api'
 import { fileURL } from './FileView'
 import { FileIcon, FolderIcon } from './icons'
 import { filesChanged, useStore } from './store'
@@ -31,6 +31,15 @@ export function Explorer({ root, onOpen, active, byName }: Props) {
       setLists((cur) => ({ ...cur, [dir]: l }))
       setErr('')
     } catch (e) {
+      if (dir && e instanceof HTTPError && e.status === 404) {
+        // An expanded folder was moved or deleted since (by Claude, say):
+        // forget it and what was open under it; the parent's list no
+        // longer shows it.
+        const gone = (p: string) => p === dir || p.startsWith(dir + '/')
+        setOpen((cur) => new Set([...cur].filter((p) => !gone(p))))
+        setLists((cur) => Object.fromEntries(Object.entries(cur).filter(([p]) => !gone(p))))
+        return
+      }
       setErr(String(e instanceof Error ? e.message : e))
     }
   }

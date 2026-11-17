@@ -5,7 +5,7 @@
 import { useSyncExternalStore } from 'react'
 import { api, AuthError } from './api'
 import { learnWindow } from './contextwindow'
-import { applyEvent, emptyLive, type Live } from './live'
+import { applyEvent, emptyLive, working, type Live } from './live'
 import { showFavicon } from './favicon'
 import { finishedIn, flat, folderKey, followMoves, isUnread, loadTabs as loadLocalTabs, movedPath, sameFolder } from './local'
 import { folderHash, parseRoute } from './route'
@@ -235,9 +235,9 @@ function showCount() {
 // once left the icon idle while agents worked.
 function showIcon() {
   const here = (id: string) => !placeFolder || sameFolder(state.sessions.find((s) => s.id === id)?.folder, placeFolder)
-  const working = [...Object.keys(state.live.turns), ...Object.keys(state.live.tasks)].some(here)
+  const active = [...Object.keys(state.live.turns).filter((id) => working(state.live, id)), ...Object.keys(state.live.tasks)].some(here)
   if (finishedIn(state.finished, state.sessions, placeFolder)) showFavicon('done')
-  else showFavicon(working ? 'run' : 'idle')
+  else showFavicon(active ? 'run' : 'idle')
 }
 listeners.add(showIcon)
 

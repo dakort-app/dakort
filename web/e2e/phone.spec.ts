@@ -878,8 +878,9 @@ test('an HTML file opens outside the app', async ({ page }) => {
   await expect(page.locator('.file-head a', { hasText: 'Open in new tab' })).toHaveCount(0)
 })
 
-// A spreadsheet is not shown: a note says what to do, and on the computer
-// a button opens it in its program. Nothing of the file is fetched.
+// An OpenDocument spreadsheet is not shown (.xlsx is, see the Excel check):
+// a note says to save it as .xlsx, and on the computer a button opens it
+// in its program. Nothing of the file is fetched.
 test('a spreadsheet says how to open it', async ({ page }) => {
   const s = await openSession(page, (l) => l[0])
   let local = false
@@ -888,26 +889,26 @@ test('a spreadsheet says how to open it', async ({ page }) => {
   await page.route('**/api/here', (route) => route.fulfill({ json: { local } }))
   await page.route(/\/api\/files\/(stat|raw|open)\?/, (route) => {
     const u = new URL(route.request().url())
-    if (u.searchParams.get('path') !== 'madetest-budget.xlsx') return route.fallback()
+    if (u.searchParams.get('path') !== 'madetest-budget.ods') return route.fallback()
     if (u.pathname.endsWith('/open')) {
-      opened.push('xlsx')
+      opened.push('ods')
       return route.fulfill({ json: { ok: true } })
     }
     if (u.pathname.endsWith('/raw')) fetched++
     return route.fulfill({ json: { size: 4096, mtime: '2026-11-07T00:00:00Z' } })
   })
-  const tab = 'f:madetest-budget.xlsx'
+  const tab = 'f:madetest-budget.ods'
   await seedTabs(page, s.folder!, { ids: [s.id, tab], active: tab })
   await page.reload()
   const note = page.locator('.office-note')
-  await expect(note).toContainText('does not show .xlsx files')
-  await expect(note).toContainText('export a sheet as CSV')
+  await expect(note).toContainText('does not show .ods files')
+  await expect(note).toContainText('save it as .xlsx')
   await expect(page.locator('.file-head').getByRole('button', { name: 'Open on the computer' })).toHaveCount(0)
 
   local = true
   await page.reload()
   await page.locator('.file-head').getByRole('button', { name: 'Open on the computer' }).click()
-  await expect.poll(() => opened).toEqual(['xlsx'])
+  await expect.poll(() => opened).toEqual(['ods'])
   expect(fetched).toBe(0)
 })
 
@@ -944,6 +945,62 @@ test('an archive lists its contents', async ({ page }) => {
   await expect(rows.nth(2)).toContainText('main.go')
   await rows.nth(0).click()
   await expect(rows).toHaveCount(1)
+})
+
+// An Excel file opens as a table per sheet with its fills, bold, text
+// colours, merged cells, widths and number formats; hidden sheets stay
+// hidden; a formula with no computed value is counted. The file is served
+// by the test (e2e/sample.xlsx, from make_sample_xlsx.py).
+test('an Excel file shows as formatted sheets', async ({ page }, info) => {
+  const s = await openSession(page, (l) => l[0])
+  const name = 'madetest-sample.xlsx'
+  const body = readFileSync(new URL('sample.xlsx', import.meta.url))
+  await page.route(/\/api\/files\/(stat|raw)\?/, (route) => {
+    const u = new URL(route.request().url())
+    if (u.searchParams.get('path') !== name) return route.fallback()
+    if (u.pathname.endsWith('/stat')) return route.fulfill({ json: { size: body.length, mtime: '2026-11-16T00:00:00Z' } })
+    return route.fulfill({ body, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  })
+  const tab = 'f:' + name
+  await seedTabs(page, s.folder!, { ids: [s.id, tab], active: tab })
+  await page.reload()
+  const table = page.locator('.sheet-table')
+  await expect(table).toBeVisible()
+  const cell = (r: number, c: number) => table.locator('tbody tr').nth(r - 1).locator('td').nth(c) // 0 is the row number
+  // The merged title spans three columns, bold and centred.
+  await expect(cell(1, 1)).toHaveText('Sample sheet')
+  await expect(cell(1, 1)).toHaveAttribute('colspan', '3')
+  await expect(cell(1, 1)).toHaveCSS('font-weight', '700')
+  await expect(cell(1, 1)).toHaveCSS('text-align', 'center')
+  // The header row's grey fill, a yellow cell, grey text.
+  await expect(cell(2, 1)).toHaveText('Item')
+  await expect(cell(2, 1)).toHaveCSS('background-color', 'rgb(217, 217, 217)')
+  await expect(cell(3, 1)).toHaveCSS('background-color', 'rgb(255, 242, 204)')
+  await expect(cell(4, 1)).toHaveCSS('color', 'rgb(128, 128, 128)')
+  // Number, percent and date formats; numbers right-aligned.
+  await expect(cell(3, 2)).toHaveText('1,234.50')
+  await expect(cell(3, 2)).toHaveCSS('text-align', 'right')
+  await expect(cell(3, 3)).toHaveText('13%')
+  await expect(cell(3, 4)).toHaveText('2026-11-16')
+  await expect(cell(5, 2)).toHaveText('0.75')
+  // The formula openpyxl wrote has no result: blank, and said so.
+  await expect(cell(6, 2)).toHaveText('')
+  await expect(page.locator('.sheet-foot')).toContainText('1 formula cell has no computed value')
+  // Column A is wider than C, as set.
+  const a = (await table.locator('thead th').nth(1).boundingBox())!
+  const c = (await table.locator('thead th').nth(3).boundingBox())!
+  expect(a.width).toBeGreaterThan(c.width * 1.3)
+  await page.screenshot({ path: `test-results/xlsx-${info.project.name}.png` })
+  // Two visible sheets; the hidden one is not offered.
+  const tabs = page.locator('.sheet-tab')
+  await expect(tabs).toHaveCount(2)
+  await expect(tabs).toHaveText(['Data', 'Notes'])
+  await tabs.nth(1).click()
+  await expect(cell(1, 1)).toHaveText('A second sheet')
+  await expect(page.locator('.sheet-foot')).toContainText('2 rows × 1 column')
+  // The head has the path and the computer's Open button, no Source toggle.
+  await expect(page.locator('.file-head')).toContainText(name)
+  await expect(page.locator('.file-head').getByRole('button', { name: 'Source' })).toHaveCount(0)
 })
 
 // A Word file opens as pages, shrunk to the width on a phone. The file is
@@ -1416,6 +1473,60 @@ test('a process a turn left running shows with a Stop', async ({ page }, info) =
   await page.unroute(`**/api/sessions/${s.id}/leftovers/4242/stop`)
 })
 
+// On a phone the context meter sits in the box's corner; the number is
+// hidden there (bar only), so the first line of a message does not run
+// under it. On a desktop the row has room for both.
+test('the context meter leaves room for the first line on a phone', async ({ page }, info) => {
+  await openSession(page, (l) => l.filter((x) => x.provider !== 'codex' && !x.heldBy && x.size > 100_000).sort((a, b) => a.size - b.size)[0])
+  const ctx = page.locator('.composer .ctx')
+  await expect(ctx).toBeVisible()
+  const num = ctx.locator('.ctx-num')
+  if (info.project.name === 'desktop') {
+    await expect(num).toBeVisible()
+  } else {
+    await expect(num).toBeHidden()
+    const meter = (await ctx.boundingBox())!
+    const box = (await page.locator('.composer-box textarea').boundingBox())!
+    const pad = await page.locator('.composer-box textarea').evaluate((el) => parseFloat(getComputedStyle(el).paddingRight))
+    expect(meter.width).toBeLessThanOrEqual(pad)
+    expect(meter.x).toBeGreaterThanOrEqual(box.x + box.width - pad - 1)
+  }
+})
+
+// More than two fold into one line with Show and Stop all, and the opened
+// list scrolls rather than covering the transcript (ten watcher processes
+// did, on 2026-11-15).
+test('many processes left running fold into one line', async ({ page }, info) => {
+  const s = await openSession(page, (l) => l.filter((x) => x.provider !== 'codex' && !x.heldBy)[0] ?? l[0])
+  const play = (ev: object) => page.evaluate((ev) => (window as any).dakort.stream.onEvent(ev), ev)
+  const stopped: string[] = []
+  await page.route(`**/api/sessions/${s.id}/leftovers/*/stop`, (route) => {
+    stopped.push(route.request().url().split('/').at(-2)!)
+    return route.fulfill({ json: {} })
+  })
+  const started = new Date(Date.now() - 8 * 3600_000).toISOString()
+  const many = Array.from({ length: 10 }, (_, i) => ({ pid: 5000 + i, name: i % 2 ? 'tail.exe' : 'bash.exe', command: `watcher ${i}`, started }))
+  await play({ type: 'leftovers', session: s.id, leftovers: many })
+  const head = page.locator('.leftovers .leftovers-head')
+  const rows = page.locator('.leftovers .leftovers-list .queued-item')
+  await expect(head).toContainText('10 processes still running')
+  await expect(rows).toHaveCount(0)
+  await head.getByRole('button', { name: 'Show' }).click()
+  await expect(rows).toHaveCount(10)
+  const list = page.locator('.leftovers .leftovers-list')
+  const box = (await list.boundingBox())!
+  expect(box.height).toBeLessThanOrEqual(page.viewportSize()!.height * 0.3 + 1)
+  await page.screenshot({ path: `test-results/leftovers-many-${info.project.name}.png` })
+  await head.getByRole('button', { name: 'Hide' }).click()
+  await expect(rows).toHaveCount(0)
+  await head.getByRole('button', { name: 'Stop all' }).click()
+  await expect.poll(() => stopped.length).toBe(10)
+  expect(new Set(stopped).size).toBe(10)
+  await play({ type: 'leftovers', session: s.id })
+  await expect(head).toHaveCount(0)
+  await page.unroute(`**/api/sessions/${s.id}/leftovers/*/stop`)
+})
+
 // A message sent while a turn runs is queued on the server (queue.go):
 // the send says queue, the queue shows above the box with a take-back,
 // and a stop puts what was queued back in the box. The turn and the queue
@@ -1760,6 +1871,52 @@ test('a newer release is announced under the folder list; the build is in the sh
   const notice = page.locator('.notice.release')
   await expect(notice).toContainText('v9.9.9 is out')
   await expect(notice).toContainText('dakort update')
+})
+
+// The PROJECTS header in a sidebar dragged narrow (issue 1): + and the
+// hide button stay inside the sidebar, Other devices and the theme fold
+// into a More menu, and the connection dot is off the button row (shown
+// only while reconnecting). On a phone the drawer keeps its full row.
+test('the projects header fits a narrow sidebar', async ({ page }, info) => {
+  await openSession(page, (l) => l[0])
+  const head = page.locator('.folder-list .panel-head')
+  if (info.project.name !== 'desktop') await page.getByRole('button', { name: 'Show the sidebar' }).click() // the drawer
+  await expect(head.locator('.dot.ok')).toBeAttached()
+  await expect(head.locator('.dot.ok')).toBeHidden() // connected: quiet
+  if (info.project.name !== 'desktop') {
+    await expect(head.getByRole('button', { name: 'Other devices' })).toBeVisible()
+    await expect(head.getByRole('button', { name: 'More', exact: true })).toHaveCount(0)
+    return
+  }
+  // The default width holds the whole row.
+  await expect(head.getByRole('button', { name: 'Other devices' })).toBeVisible()
+  await expect(head.getByRole('button', { name: 'More', exact: true })).toHaveCount(0)
+  // Dragged as narrow as it goes.
+  const bar = (await page.locator('.splitter').boundingBox())!
+  await page.mouse.move(bar.x + bar.width / 2, bar.y + 200)
+  await page.mouse.down()
+  await page.mouse.move(20, bar.y + 200, { steps: 8 })
+  await page.mouse.up()
+  const panel = (await page.locator('.explorer-panel').boundingBox())!
+  expect(panel.width).toBeLessThan(260)
+  for (const name of ['Open project', 'Hide the sidebar', 'More']) {
+    const b = (await head.getByRole('button', { name }).boundingBox())!
+    expect(b.x + b.width, name).toBeLessThanOrEqual(panel.x + panel.width)
+  }
+  await expect(head.getByRole('button', { name: 'Other devices' })).toHaveCount(0)
+  await head.getByRole('button', { name: 'More', exact: true }).click()
+  const menu = page.locator('.head-menu')
+  await expect(menu.getByRole('menuitem')).toHaveText(['Other devices', 'Switch to dark'])
+  await menu.getByRole('menuitem', { name: 'Switch to dark' }).click()
+  await expect(menu).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('dark')
+  await head.getByRole('button', { name: 'More', exact: true }).click()
+  await menu.getByRole('menuitem', { name: 'Switch to light' }).click()
+  await head.getByRole('button', { name: 'More', exact: true }).click()
+  await menu.getByRole('menuitem', { name: 'Other devices' }).click()
+  await expect(page.locator('.sheet')).toContainText('Other devices')
+  // Back to the default width for the checks after this one.
+  await page.evaluate(() => localStorage.removeItem('dakort.explorerWidth'))
 })
 
 // The Other devices panel (the icon beside the moon): on the computer the

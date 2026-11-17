@@ -1,10 +1,10 @@
-import { Fragment, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { api, HTTPError, postJSON } from './api'
 import { releasesURL, useConfig } from './config'
 import { StreamDot } from './Home'
 import { Devices } from './Devices'
-import { DevicesIcon, MoonIcon, PlusIcon, SunIcon } from './icons'
-import { busy, tasksTitle } from './live'
+import { DevicesIcon, MoonIcon, MoreIcon, PlusIcon, SunIcon } from './icons'
+import { busy, tasksTitle, working } from './live'
 import { followMoves, isUnread, sameFolder } from './local'
 import { OpenFolder } from './OpenFolder'
 import { baseName, folderHash } from './route'
@@ -36,7 +36,7 @@ function useFolders(current: string) {
     .sort((a, b) => baseName(a.path).localeCompare(baseName(b.path), undefined, { sensitivity: 'base' }))
   const state = (f: Folder) => {
     const mine = sessions.filter((s) => sameFolder(s.folder, f.path))
-    if (mine.some((s) => live.turns[s.id])) return 'run'
+    if (mine.some((s) => working(live, s.id))) return 'run'
     if (f.path !== current && mine.some(isUnread)) return 'unread'
     if (mine.some((s) => busy(live, s.id))) return 'tasks'
     return ''
@@ -185,6 +185,14 @@ export function FolderList({ current, hide }: { current: string; hide?: ReactNod
   const [folded, setFolded] = useState(() => localStorage.getItem(foldedKey) === '1')
   const [all, setAll] = useState(false)
   const [devices, setDevices] = useState(false)
+  const [dark, setDarkState] = useState(isDark)
+  const toggleDark = () => {
+    setDark(!dark)
+    setDarkState(!dark)
+  }
+  // devices, theme, + and hide
+  const { head, label, narrow } = useNarrow(hide ? 4 : 3)
+  const { more, setMore } = useMenu()
   const fold = () => {
     setFolded(!folded)
     localStorage.setItem(foldedKey, folded ? '0' : '1')
@@ -209,25 +217,45 @@ export function FolderList({ current, hide }: { current: string; hide?: ReactNod
   const hidden = open.filter((f) => !shown.includes(f))
   const elsewhere = others(open, current, state)
 
+  // The lesser icons, in the row while it has room for them all and in the
+  // More menu once it does not; + and hide always stay in the row.
+  const lesser = [{ label: 'Other devices', icon: <DevicesIcon />, act: () => setDevices(true) }, themeItem(dark, toggleDark)]
   return (
     <div className="folder-list">
-      <div className="panel-head">
-        <button className="fold" onClick={fold} aria-expanded={!folded} title={build ? `Dakort ${build}` : undefined}>
+      <div className="panel-head" ref={head}>
+        <button className="fold" ref={label} onClick={fold} aria-expanded={!folded} title={build ? `Dakort ${build}` : undefined}>
           <span className="small faint explorer-title">PROJECTS</span>
           <span className="faint">{folded ? '▸' : '▾'}</span>
         </button>
+        <StreamDot quiet />
         {folded && elsewhere && <ActivityDot st={elsewhere} />}
         <span className="grow" />
-        <button className="icon theme-btn" onClick={() => setDevices(true)} aria-label="Other devices" title="Other devices">
-          <DevicesIcon />
-        </button>
-        <ThemeButton />
-        <StreamDot />
+        {narrow ? (
+          <button className="icon theme-btn" onClick={(e) => setMore(more ? null : e.currentTarget.getBoundingClientRect())} aria-label="More" aria-expanded={!!more} title="More">
+            <MoreIcon />
+          </button>
+        ) : (
+          lesser.map((it) => (
+            <button key={it.label} className="icon theme-btn" onClick={it.act} aria-label={it.label} title={it.label}>
+              {it.icon}
+            </button>
+          ))
+        )}
         <button className="icon" onClick={pick} aria-label="Open project" title="Open project">
           <PlusIcon />
         </button>
         {hide}
       </div>
+      {more && narrow && (
+        <div className="tab-menu head-menu" role="menu" style={{ left: more.left, top: more.bottom + 2 }}>
+          {lesser.map((it) => (
+            <button key={it.label} role="menuitem" onClick={() => (setMore(null), it.act())}>
+              {it.icon}
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
       {!folded && (
         <>
           {shown.map((f) => row(f))}
@@ -274,23 +302,53 @@ function VersionLine() {
   )
 }
 
-// ThemeButton switches light and dark, remembered on this device. It
-// shows what a tap gives: the moon in light, the sun in dark.
-function ThemeButton() {
-  const [dark, setDarkState] = useState(isDark)
-  return (
-    <button
-      className="icon theme-btn"
-      onClick={() => {
-        setDark(!dark)
-        setDarkState(!dark)
-      }}
-      aria-label={dark ? 'Switch to light' : 'Switch to dark'}
-      title={dark ? 'Switch to light' : 'Switch to dark'}
-    >
-      {dark ? <SunIcon /> : <MoonIcon />}
-    </button>
-  )
+// The theme switch, light and dark, remembered on this device. It shows
+// what a tap gives: the moon in light, the sun in dark.
+function themeItem(dark: boolean, toggle: () => void) {
+  const label = dark ? 'Switch to light' : 'Switch to dark'
+  return { label, icon: dark ? <SunIcon /> : <MoonIcon />, act: toggle }
+}
+
+// useNarrow tells whether the header row lacks room for every icon (n of
+// them, 36 px each and a 4 px gap) beside the PROJECTS label and a dot's
+// room. Laptop only: the phone's drawer keeps its full row. The need does
+// not depend on the answer, so the row does not flip back and forth.
+function useNarrow(n: number) {
+  const head = useRef<HTMLDivElement>(null)
+  const label = useRef<HTMLButtonElement>(null)
+  const [narrow, setNarrow] = useState(false)
+  useLayoutEffect(() => {
+    const el = head.current
+    if (!el) return
+    const check = () => {
+      const need = 12 + 4 + (label.current?.offsetWidth ?? 0) + 4 + 14 + n * 40
+      setNarrow(matchMedia('(min-width: 900px)').matches && el.clientWidth < need)
+    }
+    check()
+    const ro = new ResizeObserver(check)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [n])
+  return { head, label, narrow }
+}
+
+// The More menu closes on a tap elsewhere, Escape, or the window losing focus.
+function useMenu() {
+  const [more, setMore] = useState<DOMRect | null>(null)
+  useEffect(() => {
+    if (!more) return
+    const off = (e: Event) => !(e.target as HTMLElement).closest?.('.head-menu, .folder-list [aria-label="More"]') && setMore(null)
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setMore(null)
+    addEventListener('pointerdown', off, true)
+    addEventListener('blur', off)
+    addEventListener('keydown', esc)
+    return () => {
+      removeEventListener('pointerdown', off, true)
+      removeEventListener('blur', off)
+      removeEventListener('keydown', esc)
+    }
+  }, [more])
+  return { more, setMore }
 }
 
 // What the other open folders are doing: 'run' when a turn runs in one

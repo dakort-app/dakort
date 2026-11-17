@@ -45,7 +45,11 @@ export function Home() {
   )
 }
 
-export function StreamDot() {
+// quiet shows it only while reconnecting (the PROJECTS header, where a
+// green dot read as a stray mark among the buttons); connected leaves a
+// hidden marker, so a check can still tell.
+export function StreamDot({ quiet }: { quiet?: boolean }) {
   const st = useStore((s) => s.stream)
+  if (quiet && st === 'open') return <span className="dot ok" hidden />
   return <span className={'dot ' + (st === 'open' ? 'ok' : 'warn')} title={st === 'open' ? 'connected' : 'reconnecting'} />
 }

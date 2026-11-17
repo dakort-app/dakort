@@ -8,6 +8,11 @@ import { isRelative } from './mdrender'
 const CodeView = lazy(() => import('./CodeView').then((m) => ({ default: m.CodeView })))
 const PdfView = lazy(() => import('./PdfView').then((m) => ({ default: m.PdfView })))
 const DocxView = lazy(() => import('./DocxView').then((m) => ({ default: m.DocxView })))
+const SheetView = lazy(() => import('./SheetView').then((m) => ({ default: m.SheetView })))
+// Excel workbooks, read in the browser by ExcelJS (SheetView). The older
+// .xls and .ods stay with the computer's programs; LibreOffice saves either
+// as .xlsx.
+const sheets = new Set(['xlsx', 'xlsm'])
 const CsvView = lazy(() => import('./CsvView').then((m) => ({ default: m.CsvView })))
 const tables = new Set(['csv', 'tsv'])
 const ArchiveView = lazy(() => import('./ArchiveView').then((m) => ({ default: m.ArchiveView })))
@@ -50,9 +55,9 @@ function useLocal() {
   return here
 }
 
-// The office files the app leaves to the computer's own programs; matches
-// officeExts in openlocal.go.
-const office = new Set(['xlsx', 'xls', 'ods', 'numbers', 'pptx', 'ppt', 'odp', 'key', 'odt', 'doc', 'rtf'])
+// The office files the app leaves to the computer's own programs; with
+// the sheets above, matches officeExts in openlocal.go.
+const office = new Set(['xls', 'ods', 'numbers', 'pptx', 'ppt', 'odp', 'key', 'odt', 'doc', 'rtf'])
 
 function OpenButton({ root, path, html }: { root: string; path: string; html: boolean }) {
   const here = useLocal()
@@ -86,13 +91,13 @@ function OpenButton({ root, path, html }: { root: string; path: string; html: bo
 function OfficeNote({ path }: { path: string }) {
   const here = useLocal()
   const ext = extOf(path)
-  const sheet = ['xlsx', 'xls', 'ods', 'numbers'].includes(ext)
+  const sheet = ['xls', 'ods', 'numbers'].includes(ext)
   return (
     <div className="center faint office-note">
       <p>Dakort does not show .{ext} files.</p>
       <p>
         {here ? 'Open on the computer, above, opens it in its program. ' : 'On the computer Dakort runs on, a button here opens it in its program. '}
-        {sheet ? 'Or ask the agent to export a sheet as CSV, which opens here as a table.' : 'Or ask the agent to save it as PDF, which opens here.'}
+        {sheet ? 'Or save it as .xlsx (Excel and LibreOffice both can), which opens here.' : 'Or ask the agent to save it as PDF, which opens here.'}
       </p>
     </div>
   )
@@ -197,7 +202,7 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
 
   useEffect(() => {
     // An SVG is text too, for its Source view.
-    if (!stat || (images.has(ext) && ext !== 'svg') || videos.has(ext) || sounds.has(ext) || isArchive(path) || office.has(ext) || ext === 'pdf' || ext === 'docx') return
+    if (!stat || (images.has(ext) && ext !== 'svg') || videos.has(ext) || sounds.has(ext) || isArchive(path) || office.has(ext) || sheets.has(ext) || ext === 'pdf' || ext === 'docx') return
     if (stat.size > maxText) {
       setLoaded({ kind: 'large', size: stat.size })
       return
@@ -333,7 +338,7 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
           {source ? (ext === 'md' ? 'Preview' : ext === 'svg' ? 'Picture' : 'Table') : 'Source'}
         </button>
       )}
-      {!dirty && (ext === 'html' || ext === 'htm' || office.has(ext)) && <OpenButton root={root} path={path} html={!office.has(ext)} />}
+      {!dirty && (ext === 'html' || ext === 'htm' || office.has(ext) || sheets.has(ext)) && <OpenButton root={root} path={path} html={ext === 'html' || ext === 'htm'} />}
       {!dirty && <DownloadButton root={root} path={path} />}
     </div>
   )
@@ -367,7 +372,14 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
     )
   }
   else if (office.has(ext)) body = <OfficeNote path={path} />
-  else if (isArchive(path)) {
+  else if (sheets.has(ext)) {
+    // Read again when the file changes (the agent or Excel saved it).
+    body = (
+      <Suspense fallback={<div className="center faint">Loading…</div>}>
+        <SheetView root={root} path={path} version={stat ? stat.size + ':' + stat.mtime : ''} size={stat?.size ?? 0} />
+      </Suspense>
+    )
+  } else if (isArchive(path)) {
     body = (
       <Suspense fallback={<div className="center faint">Loading…</div>}>
         <ArchiveView root={root} path={path} version={stat ? stat.size + ':' + stat.mtime : ''} />

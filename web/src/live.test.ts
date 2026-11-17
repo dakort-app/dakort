@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyEvent, busy, emptyLive, landed, liveBlocks, type Live } from './live'
+import { applyEvent, busy, emptyLive, landed, liveBlocks, working, type Live } from './live'
 import type { Ev, LiveBlock, Row } from './types'
 
 const run = (evs: Ev[], from: Live = emptyLive) => evs.reduce(applyEvent, from)
@@ -81,6 +81,20 @@ describe('live state', () => {
     expect(liveBlocks(l.turns.s).map((b) => b.text)).toEqual(['a', 'b'])
     // And an empty snapshot clears everything (turns is omitted when empty).
     expect(applyEvent(l, { type: 'snapshot' }).turns).toEqual({})
+  })
+})
+
+describe('idle housekeeping', () => {
+  it('is not work: no run dot for a compaction, from an event or a snapshot', () => {
+    let l: Live = applyEvent(emptyLive, { type: 'turn', session: 's', state: 'running', idle: true })
+    expect(l.turns.s.idle).toBe(true)
+    expect(working(l, 's')).toBe(false)
+    expect(busy(l, 's')).toBe('')
+    l = applyEvent(emptyLive, { type: 'snapshot', turns: [{ session: 's', state: 'running', idle: true }] })
+    expect(working(l, 's')).toBe(false)
+    // A wake-up turn after it is real work again.
+    l = applyEvent(l, { type: 'turn', session: 's', state: 'running' })
+    expect(working(l, 's')).toBe(true)
   })
 })
 

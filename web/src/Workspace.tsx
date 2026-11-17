@@ -10,7 +10,7 @@ import { copyText } from './clip'
 import { loadSharedTabs, shareTabs } from './store'
 import { clampRatio, closeTab as closeIn, focusOf, merged, moveTab, pane, selectTab, split, splitBeside, unsplit, withPane, type Pane, type PaneNo } from './local'
 import { ago, baseName } from './route'
-import { busy, tasksTitle } from './live'
+import { busy, tasksTitle, working } from './live'
 import { postJSON } from './api'
 import { SessionView } from './SessionView'
 import { refreshLists, setPlace, useStore } from './store'
@@ -111,8 +111,11 @@ export function Workspace({ folder }: { folder: string }) {
   // While dragging, the width goes straight onto the page: a render per
   // mouse move re-rendered the whole transcript and fell behind the mouse.
   // It becomes state once, on release.
-  const [paneW, setPaneW] = useState(explorerWidth)
-  const clamp = (w: number) => Math.max(160, Math.min(w, window.innerWidth * 0.6))
+  // At least room for the PROJECTS header's short row (the label, a dot,
+  // More, + and hide; FolderBar's useNarrow folds the rest away): at 160
+  // + and hide were cut off. A width saved narrower comes back at that.
+  const clamp = (w: number) => Math.max(240, Math.min(w, window.innerWidth * 0.6))
+  const [paneW, setPaneW] = useState(() => clamp(explorerWidth()))
   const resize = (w: number) => {
     setPaneW(clamp(w))
     setExplorerWidth(clamp(w))
@@ -368,7 +371,7 @@ export function Workspace({ folder }: { folder: string }) {
         : (byId.get(id)?.title ?? (loaded && id !== NEW && !live.turns[id] ? id.slice(0, 8) : 'New session'))
   const tabDot = (id: string) => {
     const s = byId.get(id)
-    if (live.turns[id]) return <span className="dot run" title="working" />
+    if (working(live, id)) return <span className="dot run" title="working" />
     if (s && !shown.includes(s) && isUnread(s)) return <span className="dot unread" title="finished, not seen" />
     if (busy(live, id) === 'tasks') return <span className="dot tasks" title={tasksTitle} />
     return null
@@ -591,7 +594,7 @@ export function Workspace({ folder }: { folder: string }) {
                     <div className="faint small ellipsis">
                       {id.startsWith(FILE)
                         ? id.slice(FILE.length)
-                        : live.turns[id]
+                        : working(live, id)
                           ? 'working…'
                           : busy(live, id) === 'tasks'
                             ? 'running in the background…'

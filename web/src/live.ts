@@ -7,6 +7,7 @@ export type LiveTurn = {
   session: string
   promptId?: string
   state: 'starting' | 'running'
+  idle?: boolean // housekeeping the server runs (an idle compaction, a rename): not work to announce
   blocks: Record<number, LiveBlock> // the reply's parts not yet in the transcript
   permissions: Permission[]
 }
@@ -38,6 +39,7 @@ export function applyEvent(live: Live, e: Ev): Live {
           session: lt.session,
           promptId: lt.promptId,
           state: lt.state,
+          idle: lt.idle,
           blocks,
           permissions: lt.permissions ?? [],
         }
@@ -72,6 +74,7 @@ export function applyEvent(live: Live, e: Ev): Live {
         ? { ...t, state: e.state as LiveTurn['state'] }
         : { session: s, state: e.state as LiveTurn['state'], blocks: {}, permissions: [] }
       if (e.promptId) next.promptId = e.promptId
+      next.idle = !!e.idle
       return { ...live, turns: { ...live.turns, [s]: next } }
     }
     case 'delta': {
@@ -102,11 +105,17 @@ export function applyEvent(live: Live, e: Ev): Live {
 // busy says what a session is doing now: 'run' while a turn runs, 'tasks'
 // while only its background tasks do (agents, commands, monitors: the turn
 // that started them has ended and a prompt is taken at once), '' when
-// neither. Without 'tasks' a session with agents out read as idle.
+// neither. Without 'tasks' a session with agents out read as idle. An
+// idle compaction is not 'run': it pulsed the tab and the folder an hour
+// after a reply was read, which looked like new work (2026-11-16).
 export function busy(live: Live, id: string): '' | 'run' | 'tasks' {
-  if (live.turns[id]) return 'run'
+  if (working(live, id)) return 'run'
   return live.tasks[id]?.length ? 'tasks' : ''
 }
+
+// working says a turn someone sent is running: not the server's own
+// housekeeping, which the session itself shows but no tab or folder does.
+export const working = (live: Live, id: string) => !!live.turns[id] && !live.turns[id].idle
 export const tasksTitle = 'agents or commands running in the background; a message is answered now'
 
 // landed says whether finished previews are on screen as rows now: each text

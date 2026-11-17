@@ -336,6 +336,17 @@ export function Composer({ session, folder, onStarted, filesIn }: Props) {
       setError(e instanceof Error ? e.message : String(e))
     }
   }
+  // More than a couple fold into one line (a turn that started watchers on
+  // a cluster job left ten of them, bash, tail and grep each, and the rows
+  // covered the transcript on 2026-11-15); the list opens on request and
+  // scrolls, and one button ends them all.
+  const [showLeftovers, setShowLeftovers] = useState(false)
+  const folded = (leftovers?.length ?? 0) > 2
+  const stopAllLeftovers = async () => {
+    const r = await Promise.allSettled((leftovers ?? []).map((p) => postJSON(`/api/sessions/${id}/leftovers/${p.pid}/stop`, {})))
+    const failed = r.find((x): x is PromiseRejectedResult => x.status === 'rejected')
+    if (failed) setError(failed.reason instanceof Error ? failed.reason.message : String(failed.reason))
+  }
 
   const unqueue = async (promptId: string) => {
     try {
@@ -382,23 +393,38 @@ export function Composer({ session, folder, onStarted, filesIn }: Props) {
       {id && <Tasks session={id} onError={setError} />}
       {leftovers?.length ? (
         <div className="queued leftovers">
-          {leftovers.map((p) => (
-            <div
-              key={p.pid}
-              className="queued-item"
-              title={[p.command, p.dir && 'in ' + p.dir, p.started && 'since ' + new Date(p.started).toLocaleString()].filter(Boolean).join('\n')}
-            >
-              <span className="faint small">Still running</span>
-              <span className="ellipsis grow">
-                {p.name}
-                {p.command ? <span className="faint"> · {p.command}</span> : null}
-              </span>
-              <span className="faint small">{ago(p.started)}</span>
-              <button className="btn small-btn" onClick={() => stopLeftover(p.pid)} title="End this process">
-                Stop
+          {folded && (
+            <div className="queued-item leftovers-head" title="Left running by earlier turns; nothing is ended unasked">
+              <span className="ellipsis grow">{leftovers.length} processes still running</span>
+              <button className="btn small-btn" onClick={() => setShowLeftovers(!showLeftovers)} aria-expanded={showLeftovers}>
+                {showLeftovers ? 'Hide' : 'Show'}
+              </button>
+              <button className="btn small-btn" onClick={stopAllLeftovers} title="End every one of them">
+                Stop all
               </button>
             </div>
-          ))}
+          )}
+          {(!folded || showLeftovers) && (
+            <div className="leftovers-list">
+              {leftovers.map((p) => (
+                <div
+                  key={p.pid}
+                  className="queued-item"
+                  title={[p.command, p.dir && 'in ' + p.dir, p.started && 'since ' + new Date(p.started).toLocaleString()].filter(Boolean).join('\n')}
+                >
+                  <span className="faint small">Still running</span>
+                  <span className="ellipsis grow">
+                    {p.name}
+                    {p.command ? <span className="faint"> · {p.command}</span> : null}
+                  </span>
+                  <span className="faint small">{ago(p.started)}</span>
+                  <button className="btn small-btn" onClick={() => stopLeftover(p.pid)} title="End this process">
+                    Stop
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       ) : null}
       {queued?.length ? (
@@ -607,7 +633,7 @@ function ContextSize({ session, context, model }: { session: string; context: nu
     : `Context: ${tokens(context)} tokens in the last call`
   return (
     <span className="ctx" title={title}>
-      {tokens(context)}
+      <span className="ctx-num">{tokens(context)}</span>
       {win && (
         <span className={'ctx-bar' + level} aria-hidden="true">
           <span className="ctx-fill" style={{ width: `max(2px, ${pct.toFixed(1)}%)` }} />

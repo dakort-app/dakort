@@ -47,9 +47,10 @@ else to install. The CLIs run only while a turn runs.
 - **Claude Code and Codex.** Model, effort and permission mode per
   session. Permission requests are cards: Allow or Deny.
 - **Files beside the agent.** Code, editable and saved with Ctrl+S.
-  PDFs with search and SyncTeX both ways. Word documents as pages. CSV as
-  tables. Images, SVG, video, audio. Archives as a tree. A file the agent
-  changes re-renders at once.
+  PDFs with search and SyncTeX both ways. Word documents as pages. Excel
+  workbooks as sheets, with their colours and formats. CSV as tables.
+  Images, SVG, video, audio. Archives as a tree. A file the agent changes
+  re-renders at once.
 - **An eye on cost.** Each session shows how full its context is and how
   long its prompt cache stays warm, which is what decides what the next
   message costs. A big session left idle is compacted before the cache

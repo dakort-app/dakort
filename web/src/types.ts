@@ -114,6 +114,7 @@ export type LiveTurnJSON = {
   session: string
   promptId?: string
   state: 'starting' | 'running'
+  idle?: boolean // housekeeping the server runs (compact, rename)
   blocks?: Record<string, LiveBlock>
   permissions?: Permission[]
 }

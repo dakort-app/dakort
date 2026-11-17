@@ -88,6 +88,13 @@ export const PlusIcon = () => (
   </svg>
 )
 
+// More: three dots, for the header icons folded away in a narrow sidebar.
+export const MoreIcon = () => (
+  <svg {...base} aria-hidden="true">
+    <path d="M5 12h.01M12 12h.01M19 12h.01" strokeWidth={3} />
+  </svg>
+)
+
 // Other devices: a QR code, which is what the panel behind it shows.
 export const DevicesIcon = () => (
   <svg {...base} aria-hidden="true">

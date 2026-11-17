@@ -203,6 +203,9 @@ a.btn {
   margin-right: 6px;
   flex-shrink: 0;
 }
+.dot[hidden] {
+  display: none;
+}
 .dot.ok {
   background: var(--ok);
 }
@@ -519,6 +522,15 @@ html.tab-dragging * {
 }
 .tab-menu button:hover:not(:disabled) {
   background: var(--line);
+}
+/* The PROJECTS header's More menu: each item with its icon. */
+.head-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.head-menu svg {
+  color: var(--faint);
 }
 .tab-menu button:disabled {
   color: var(--faint, #999);
@@ -876,8 +888,16 @@ html.tab-dragging * {
   .composer-box {
     position: relative;
   }
-  .composer-box textarea {
+  /* .composer first: the base rule below (.composer-box textarea, padding
+     2px 0) comes later in the file and won, so the first line of a
+     message ran under the meter (2026-11-16). */
+  .composer .composer-box textarea {
     padding-right: 38px;
+  }
+  /* The number and the bar together are twice that: the bar alone fits,
+     and the number is in the title. */
+  .box-info .ctx-num {
+    display: none;
   }
   /* Hung from the clock, mid-row, it ran off the right edge. (The base
      .cache-tip rule comes later in the file, hence the longer selector.) */
@@ -888,7 +908,7 @@ html.tab-dragging * {
     width: auto;
     bottom: calc(100px + env(safe-area-inset-bottom));
   }
-  .composer-box.held textarea {
+  .composer .composer-box.held textarea {
     padding-right: 150px;
   }
   .box-info {
@@ -1156,6 +1176,18 @@ html.tab-dragging * {
 /* A process a turn left running: solid, it is a fact, not a plan. */
 .leftovers .queued-item {
   border-style: solid;
+}
+/* Many of them open under one line and scroll, so they never cover the
+   transcript. */
+.leftovers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+.leftovers-head .btn + .btn {
+  margin-left: 2px;
 }
 .task-dot {
   width: 7px;
@@ -1983,6 +2015,87 @@ html.tab-dragging * {
 }
 .office-note {
   max-width: 440px; /* centred by .center */
+}
+/* An Excel sheet: white with black text whatever the theme, as the Word
+   view is, since the file's own colours were chosen against white. */
+.file-sheet {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.sheet-box {
+  flex: 1;
+  overflow: auto;
+  background: #fff;
+  color: #000;
+}
+.sheet-table {
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font: 13px/1 Calibri, Carlito, Arial, sans-serif;
+}
+.sheet-table th,
+.sheet-table td {
+  height: 22px;
+  padding: 0 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-right: 1px solid #e0e0e0;
+  border-bottom: 1px solid #e0e0e0;
+  text-align: left;
+}
+.sheet-table thead th,
+.sheet-table .rn {
+  background: #f3f3f3;
+  color: #555;
+  font-weight: 400;
+  text-align: center;
+}
+.sheet-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.sheet-table .rn {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+.sheet-table thead .rn {
+  z-index: 3;
+}
+.sheet-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 10px;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+.sheet-tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  flex-shrink: 0;
+  max-width: 60%;
+}
+.sheet-tab {
+  font: inherit;
+  padding: 2px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--side);
+  color: var(--faint);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sheet-tab.on {
+  color: var(--text);
+  background: var(--bg);
+  font-weight: 600;
 }
 /* Archives: a tree like the explorer's, with size and date columns. */
 .archive-row {

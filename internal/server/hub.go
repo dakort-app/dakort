@@ -94,6 +94,7 @@ type LiveTurn struct {
 	Session     string         `json:"session"`
 	PromptID    string         `json:"promptId,omitempty"`
 	State       string         `json:"state"`
+	Idle        bool           `json:"idle,omitempty"` // housekeeping the server runs (compact, rename), not work to show as running
 	Blocks      map[int]*Block `json:"blocks,omitempty"`
 	Permissions []*Permission  `json:"permissions,omitempty"`
 }
@@ -210,6 +211,7 @@ func (h *hub) apply(e Ev) {
 			h.live[e.Session] = t
 		}
 		t.State = e.State
+		t.Idle = e.Idle
 		if e.PromptID != "" {
 			t.PromptID = e.PromptID
 		}

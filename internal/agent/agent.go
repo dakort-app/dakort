@@ -67,6 +67,10 @@ type Event struct {
 	// userMessage item).
 	Replay bool
 
+	// Error is the CLI's code on a reply that stands for a failed call
+	// (KindAssistant; Claude's "authentication_failed"), else empty.
+	Error string
+
 	Model string // KindInit
 	Cwd   string // KindInit
 
@@ -116,6 +120,6 @@ type Result struct {
 	// token usage). Empty when the CLI does not say.
 	ContextWindows map[string]int
 	// SignedOut: the turn failed because the CLI is not signed in (or its
-	// login ran out); signing in is done in a terminal, by the person.
+	// login ran out); the page offers the CLI's own sign-in (server/signin.go).
 	SignedOut bool
 }

@@ -188,6 +188,23 @@ func TestRows(t *testing.T) {
 	}
 }
 
+// A lapsed login's row, as the CLI wrote it on 2026-11-17, carries its
+// code for the page; a system api_error row's error is an object and
+// must not cost the row.
+func TestAPIErrorCode(t *testing.T) {
+	path := writeFixture(t, []string{
+		`{"parentUuid":null,"type":"assistant","uuid":"e1","timestamp":"2026-11-17T14:00:59.000Z","isApiErrorMessage":true,"error":"authentication_failed","message":{"id":"x","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"Failed to authenticate: this login reached its time limit and cannot be renewed."}]}}`,
+		`{"parentUuid":"e1","type":"system","subtype":"api_error","level":"error","uuid":"e2","timestamp":"2026-11-17T14:01:00.000Z","error":{"status":503},"retryAttempt":1}`,
+	}, "")
+	rows, _, err := (&transcript.Reader{Path: path}).After(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || !rows[0].APIError || rows[0].Error != "authentication_failed" || rows[1].Error != "" || rows[1].Subtype != "api_error" {
+		t.Fatalf("rows %+v", rows)
+	}
+}
+
 func TestTail(t *testing.T) {
 	path := writeFixture(t, fixtureLines, partialLine)
 	r := &transcript.Reader{Path: path}

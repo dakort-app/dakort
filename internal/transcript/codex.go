@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/dakort-app/dakort/internal/agent"
 )
 
 // Codex keeps a session ("thread") as a rollout file under
@@ -64,6 +66,9 @@ type codexPayload struct {
 		Input int `json:"input_tokens"` // the whole prompt, cached part included
 	} `json:"usage"` // token_usage_record
 	Window int `json:"model_context_window"` // task_started
+	// task_complete of a failed turn: {message, codex_error_info}. Raw, so
+	// a payload with a string here does not cost its line.
+	Error json.RawMessage `json:"error"`
 }
 
 type codexItem struct {
@@ -239,6 +244,24 @@ func (p parser) codexRows(line []byte, start, end int64) []Row {
 			case "ImageView":
 				return []Row{call(it.ID, "ImageView", map[string]string{"path": strings.TrimPrefix(it.Path, "file:///")})}
 			}
+		case "task_complete":
+			// A failed turn's error, as a Claude API error row reads: the
+			// page shows it, and offers the sign-in under it when it is
+			// for want of a login (measured 2026-11-17, codex 0.163.0).
+			var e struct {
+				Message string          `json:"message"`
+				Info    json.RawMessage `json:"codex_error_info"`
+			}
+			if json.Unmarshal(pl.Error, &e) != nil || e.Message == "" {
+				return nil
+			}
+			r := row(synthetic("error"), Assistant)
+			r.APIError = true
+			r.Blocks = []Block{{Type: "text", Text: e.Message}}
+			if agent.CodexSignedOut(e.Info, e.Message) {
+				r.Error = "authentication_failed"
+			}
+			return []Row{r}
 		case "turn_aborted":
 			r := row(synthetic("abort"), User)
 			r.Blocks = []Block{{Type: "text", Text: "[Request interrupted by user]"}}

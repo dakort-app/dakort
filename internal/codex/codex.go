@@ -412,7 +412,8 @@ func (p *Process) handleNotification(m rpcMessage, line []byte) {
 			ID     string `json:"id"`
 			Status string `json:"status"`
 			Error  *struct {
-				Message string `json:"message"`
+				Message string          `json:"message"`
+				Info    json.RawMessage `json:"codexErrorInfo"`
 			} `json:"error"`
 		} `json:"turn"`
 		TokenUsage *struct {
@@ -487,10 +488,9 @@ func (p *Process) handleNotification(m rpcMessage, line []byte) {
 		res := &agent.Result{OK: n.Turn.Status != "failed", Interrupted: n.Turn.Status == "interrupted", Text: p.last, NumTurns: 1}
 		if n.Turn.Error != nil && n.Turn.Error.Message != "" {
 			res.Errors = []string{n.Turn.Error.Message}
-			// Not signed in: "unexpected status 401 Unauthorized: Missing
-			// bearer or basic authentication in header", after some 20 s
-			// of retries (measured 2026-10-29, codex 0.163.0).
-			res.SignedOut = strings.Contains(n.Turn.Error.Message, "401 Unauthorized")
+			// Not signed in: after some 15 to 20 s of retries, a 401 in
+			// codexErrorInfo (agent.CodexSignedOut has the measurements).
+			res.SignedOut = agent.CodexSignedOut(n.Turn.Error.Info, n.Turn.Error.Message)
 		}
 		if u := p.usage; u != nil {
 			// In Claude's shape, which the context meter reads.

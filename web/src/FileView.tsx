@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { AuthError, getJSON, HTTPError, postJSON } from './api'
 import { Markdown } from './Markdown'
 import { isRelative } from './mdrender'
@@ -20,6 +20,35 @@ const ArchiveView = lazy(() => import('./ArchiveView').then((m) => ({ default: m
 const isArchive = (path: string) => /\.(zip|tar|tgz|gz)$/i.test(path)
 
 export const extOf = (path: string) => (path.split('.').pop() ?? '').toLowerCase()
+
+// The source line of the block at the top of a Markdown preview: the
+// first block whose bottom is below the top edge, then the first of the
+// blocks inside it that is (a list is one block; the reader is at one of
+// its items), and so on in.
+function topLine(box: HTMLElement | null): number | null {
+  if (!box) return null
+  const edge = box.getBoundingClientRect().top + 1
+  let best: HTMLElement | null = null
+  for (const el of box.querySelectorAll<HTMLElement>('[data-line]')) {
+    if (el.getBoundingClientRect().bottom <= edge) continue
+    if (best && !best.contains(el)) break
+    best = el
+  }
+  return best ? Number(best.dataset.line) : null
+}
+
+// Scrolls a Markdown preview so the block that starts at line, or the
+// last one starting before it, is at the top.
+function showLine(box: HTMLElement, line: number) {
+  let best: HTMLElement | null = null
+  for (const el of box.querySelectorAll<HTMLElement>('[data-line]')) {
+    const n = Number(el.dataset.line)
+    if (n <= line && (!best || n >= Number(best.dataset.line))) best = el
+  }
+  if (!best) return
+  const pad = parseFloat(getComputedStyle(box).paddingTop) || 0
+  box.scrollTop += best.getBoundingClientRect().top - box.getBoundingClientRect().top - pad
+}
 
 // A file tab: Markdown rendered and CSV as a table (each with a Source
 // toggle), images and Word documents shown, text in the code view. It checks the file's size and time every few seconds
@@ -179,6 +208,21 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
   const [source, setSource] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
 
+  // Preview and Source of a Markdown file meet at the same place. Each
+  // block of the preview knows its source line (mdrender), the editor
+  // can say which line it is at (CodeView's pos) and open at one
+  // (startLine). mdLine is the line at the top of whichever view shows;
+  // it also holds the preview's place when the file changes under it.
+  const mdLine = useRef<number | null>(null)
+  const pos = useRef<(() => number) | null>(null)
+  const toggleSource = () => {
+    if (ext === 'md') mdLine.current = (source ? pos.current?.() : topLine(scroller.current)) ?? mdLine.current
+    setSource(!source)
+  }
+  useLayoutEffect(() => {
+    if (ext === 'md' && !source && scroller.current && mdLine.current) showLine(scroller.current, mdLine.current)
+  }, [source, loaded])
+
   // Watch the file: a change in size or time means a reload.
   useEffect(() => {
     if (ext === 'pdf') return // the PDF view watches its file itself
@@ -265,6 +309,7 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
 
   // Phone only: Edit opens the source for editing, Done closes it.
   const startEdit = () => {
+    if (ext === 'md' && !source) mdLine.current = topLine(scroller.current) ?? mdLine.current
     setSource(true) // Markdown, CSV and SVG are edited as source
     setPhoneEdit(true)
   }
@@ -334,7 +379,7 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
       )}
       {/* Unsaved typing lives in the source view, so it stays on screen. */}
       {!dirty && !phoneEdit && (ext === 'md' || ext === 'svg' || tables.has(ext)) && (
-        <button className="btn small-btn" onClick={() => setSource(!source)}>
+        <button className="btn small-btn" onClick={toggleSource}>
           {source ? (ext === 'md' ? 'Preview' : ext === 'svg' ? 'Picture' : 'Table') : 'Source'}
         </button>
       )}
@@ -429,6 +474,7 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
       <div
         className="file-md"
         ref={scroller}
+        onScroll={() => (mdLine.current = topLine(scroller.current) ?? mdLine.current)}
         onClick={(e) => {
           // Links to other files open as tabs.
           const a = (e.target as HTMLElement).closest('a[data-rel]') as HTMLAnchorElement | null
@@ -454,6 +500,8 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
           onEdit={onEdit}
           onSave={() => save()}
           doc={doc}
+          startLine={ext === 'md' ? mdLine.current ?? undefined : undefined}
+          pos={pos}
         />
       </Suspense>
     )

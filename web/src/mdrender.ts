@@ -45,6 +45,7 @@ function make() {
       `<div class="code-block">${plainRule(tokens, idx, options, env, self)}${copyButton}</div>\n`
   }
   md.core.ruler.push('table_columns', (state) => markColumns(state.tokens))
+  md.core.ruler.push('source_lines', (state) => markLines(state.tokens))
   // Before linkify (an inline rule here), which would otherwise cut the
   // URL out of the src attribute.
   md.inline.ruler.before('linkify', 'img_tag', imgTagRule)
@@ -97,7 +98,25 @@ function imgTagRule(state: InlineState, silent: boolean): boolean {
 // wide for the screen scrolls.
 const shortCell = 30 // characters, with Markdown's marks left out
 
-type Tok = { type: string; content: string; attrJoin(name: string, value: string): void }
+type Tok = {
+  type: string
+  content: string
+  map?: [number, number] | null
+  nesting: number
+  hidden?: boolean
+  attrJoin(name: string, value: string): void
+  attrSet(name: string, value: string): void
+}
+
+// Each block carries the source line it starts at, 1-based, so a file's
+// Preview and Source can meet at the same place (FileView). Nested blocks
+// too: a long list is one block, and its items are where the reader is.
+// A hidden token (the paragraph of a tight list item) renders nothing.
+function markLines(tokens: Tok[]) {
+  for (const t of tokens) {
+    if (t.map && t.nesting >= 0 && !t.hidden) t.attrSet('data-line', String(t.map[0] + 1))
+  }
+}
 
 function markColumns(tokens: Tok[]) {
   for (let i = 0; i < tokens.length; i++) {

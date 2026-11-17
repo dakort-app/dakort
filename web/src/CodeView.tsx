@@ -64,12 +64,32 @@ type Props = {
   onEdit?: () => void
   onSave?: () => void
   doc?: { current: (() => string) | null }
+  // Where the reader was in another view of the same file (FileView's
+  // Markdown preview): the line to open at, and a way to ask which line
+  // is at the top, or under the cursor when that is on screen.
+  startLine?: number
+  pos?: { current: (() => number) | null }
+}
+
+// The line the reader is at: the cursor's, when it is on screen (where
+// they were just typing), else the one at the top of the view.
+function lineAtTop(v: EditorView): number {
+  const box = v.scrollDOM.getBoundingClientRect()
+  const head = v.state.selection.main.head
+  const c = v.coordsAtPos(head)
+  if (c && c.top >= box.top && c.bottom <= box.bottom) return v.state.doc.lineAt(head).number
+  // A line mostly scrolled past (the few pixels the editor leaves above a
+  // line it opened at) is not the one the reader sees first.
+  const edge = box.top - v.documentTop
+  const block = v.lineBlockAtHeight(edge)
+  const n = v.state.doc.lineAt(block.from).number
+  return block.bottom - edge < block.height / 2 ? Math.min(n + 1, v.state.doc.lines) : n
 }
 
 const lock = (editing: boolean): Extension =>
   editing ? [history(), keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab])] : [EditorState.readOnly.of(true), EditorView.editable.of(false)]
 
-export function CodeView({ path, text, jump, visible = true, onLineClick, editing = false, onEdit, onSave, doc }: Props) {
+export function CodeView({ path, text, jump, visible = true, onLineClick, editing = false, onEdit, onSave, doc, startLine, pos }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
   const lang = useRef(new Compartment())
@@ -115,6 +135,11 @@ export function CodeView({ path, text, jump, visible = true, onLineClick, editin
     })
     view.current = v
     if (doc) doc.current = () => v.state.doc.toString()
+    if (pos) pos.current = () => lineAtTop(v)
+    if (startLine) {
+      const line = v.state.doc.line(Math.min(Math.max(startLine, 1), v.state.doc.lines))
+      v.dispatch({ effects: EditorView.scrollIntoView(line.from, { y: 'start' }) })
+    }
     let dead = false
     languages[extOf(path)]?.().then((ext) => {
       if (!dead) v.dispatch({ effects: lang.current.reconfigure(ext) })
@@ -126,6 +151,7 @@ export function CodeView({ path, text, jump, visible = true, onLineClick, editin
       v.destroy()
       view.current = null
       if (doc) doc.current = null
+      if (pos) pos.current = null
     }
   }, [path])
 

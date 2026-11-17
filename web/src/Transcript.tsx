@@ -9,7 +9,7 @@ import { Markdown } from './Markdown'
 import { PromptText } from './PromptText'
 import { SignIn } from './SignIn'
 import { latestTitle, titles } from './thinking'
-import { answer, group, promptText, resultText, toolSummary, type Item, type Part } from './rows'
+import { answer, group, landed, resultText, toolSummary, type Item, type Part } from './rows'
 import { dropPending, onCatchUp, onCollapse, setCacheLife, setContext, setLastReply, setReplyModel, setRowWindow, useStore, type Pending } from './store'
 import type { Block, LiveBlock, Row } from './types'
 import { append, canReveal, collapse, fromTail, hasOlder, pinIndex, prepend, reveal, type Win } from './window'
@@ -199,14 +199,22 @@ export function Transcript({ id }: { id: string }) {
   }, [!!turn, held.current.length])
 
   // Prompts on their way, until their row is in the transcript: by the uuid
-  // the stream echoed, or (if a gap swallowed the echo) by their text.
+  // the stream echoed, or (if a gap swallowed the echo) by their text in a
+  // row that came after the send. sent holds the last row there when each
+  // was first seen.
   const allPending = useStore((s) => s.pending)
   const pending = Object.values(allPending).filter((p) => p.session === id)
-  const done = win ? pending.filter((p) => landed(p, win.rows)) : []
+  const sent = useRef<Record<string, string>>({})
+  if (win) for (const p of pending) sent.current[p.id] ??= win.rows.at(-1)?.uuid ?? ''
+  const done = win ? pending.filter((p) => landed(p, win.rows, sent.current[p.id])) : []
   useEffect(() => {
     if (done.length) dropPending(...done.map((p) => p.id))
   }, [done.map((p) => p.id).join()])
   const waitingPrompts = pending.filter((p) => !done.includes(p)).sort((a, b) => a.at - b.at)
+  // The session ending on an error row (nothing sent since): the latest
+  // turn's failure, already in words on the page.
+  const lastItem = shown.at(-1)
+  const lastError = !waitingPrompts.length && lastItem?.kind === 'notice' && lastItem.tone === 'error' ? lastItem : undefined
 
   // The context meter reads the last assistant row's size.
   const lastRow = win?.rows[win.rows.length - 1]
@@ -292,7 +300,18 @@ export function Transcript({ id }: { id: string }) {
   }
 
   if (err && !win) return <div className="transcript center error">{err}</div>
-  if (!win) return <div className="transcript center faint">Loading…</div>
+  // A prompt just sent stays on screen while its session loads (a new
+  // session's first prompt went away for that moment).
+  if (!win)
+    return waitingPrompts.length ? (
+      <div className="transcript">
+        {waitingPrompts.map((p) => (
+          <WaitingPrompt key={p.id} p={p} />
+        ))}
+      </div>
+    ) : (
+      <div className="transcript center faint">Loading…</div>
+    )
   return (
     <div
       className="transcript"
@@ -315,14 +334,7 @@ export function Transcript({ id }: { id: string }) {
         <ItemView key={it.key} item={it} prev={shown[i - 1]} anchor={win.rows[it.last].uuid} />
       ))}
       {waitingPrompts.map((p) => (
-        <div key={p.id} className="item-wrap">
-          <div className="prompt pending">
-            {p.images.map((u) => (
-              <Thumb key={u} src={u} />
-            ))}
-            {p.text && <PromptText text={p.text} />}
-          </div>
-        </div>
+        <WaitingPrompt key={p.id} p={p} />
       ))}
       {(turn || live.length > 0) && (
         <div className="reply live">
@@ -338,10 +350,14 @@ export function Transcript({ id }: { id: string }) {
         </div>
       )}
       {!turn && ended?.error && <div className="notice error">{ended.error}</div>}
-      {!turn && ended?.result?.signIn ? (
+      {/* The sign-in, once: from the turn that just failed, or from the
+          session's last row, which a reload still has. A failed turn whose
+          error the transcript already shows says nothing more (its bare
+          terminal_reason, "api_error", read as a second failure). */}
+      {!turn && (ended?.result?.signIn || lastError?.signIn) ? (
         <SignIn cli={codex ? 'codex' : 'claude'} />
-      ) : !turn && ended?.result && !ended.result.ok && !ended.result.interrupted && (
-        <div className="notice error pre-line">{ended.result.errors?.join('\n') || ended.result.reason || 'The turn failed.'}</div>
+      ) : !turn && !lastError && ended?.result && !ended.result.ok && !ended.result.interrupted && (
+        <div className="notice error pre-line">{ended.result.errors?.join('\n') || ended.result.text || 'The turn failed.'}</div>
       )}
       {!turn && !waitingPrompts.length && lastRow && !codex && <IdleNote at={lastRow.time} context={context} life={life} />}
       {err && <div className="notice error">{err}</div>}
@@ -349,16 +365,18 @@ export function Transcript({ id }: { id: string }) {
   )
 }
 
-const landedSkew = 2 * 60_000
-
-function landed(p: Pending, rows: Row[]): boolean {
-  for (let i = rows.length - 1; i >= 0; i--) {
-    const r = rows[i]
-    if (p.row && r.uuid === p.row) return true
-    if (!p.row && r.role === 'user' && Date.parse(r.time) >= p.at - landedSkew && promptText(r) === p.text) return true
-    if (Date.parse(r.time) < p.at - landedSkew) break
-  }
-  return false
+// WaitingPrompt is a prompt on its way, greyed until its row is in.
+function WaitingPrompt({ p }: { p: Pending }) {
+  return (
+    <div className="item-wrap">
+      <div className="prompt pending">
+        {p.images.map((u) => (
+          <Thumb key={u} src={u} />
+        ))}
+        {p.text && <PromptText text={p.text} />}
+      </div>
+    </div>
+  )
 }
 
 function lastAssistantTime(rows: Row[]): number {

@@ -46,7 +46,7 @@ describe('markdown files', () => {
   it('gives each code block a Copy button beside its pre, code still escaped', () => {
     for (const src of ['```sh\necho <b>\n```', '    indented <b>']) {
       const html = render(src)
-      expect(html).toMatch(/^<div class="code-block"><pre><code[^>]*>[^<]*&lt;b&gt;\n<\/code><\/pre>\n?<button type="button" class="code-copy"/)
+      expect(html).toMatch(/^<div class="code-block"><pre[^>]*><code[^>]*>[^<]*&lt;b&gt;\n<\/code><\/pre>\n?<button type="button" class="code-copy"/)
       expect(html.match(/<button/g)).toHaveLength(1)
     }
     expect(render('inline `code` only')).not.toContain('code-copy')
@@ -74,6 +74,19 @@ describe('tables', () => {
     )
     const classes = [...html.matchAll(/<t[hd] class="(\w+)"/g)].map((m) => m[1])
     expect(classes).toEqual(['short', 'long', 'short', 'short', 'long', 'short', 'short', 'long', 'short'])
-    expect(html).toContain('<p>after</p>')
+    expect(html).toContain('<p data-line="6">after</p>')
+  })
+})
+
+describe('source lines', () => {
+  it('stamps each block, items included, with the line it starts at', () => {
+    const html = render(['# Title', '', 'one', 'two', '', '- a', '- b', '', '```', 'x', '```', '', '> q'].join('\n'))
+    expect(html).toContain('<h1 data-line="1">')
+    expect(html).toContain('<p data-line="3">one')
+    expect(html).toContain('<ul data-line="6">')
+    expect(html).toContain('<li data-line="7">b')
+    expect(html).toContain('<code data-line="9">')
+    expect(html).toContain('<blockquote data-line="13">')
+    expect(html).not.toContain('<p data-line="6">') // a tight item's paragraph renders nothing
   })
 })

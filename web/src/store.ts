@@ -290,10 +290,13 @@ function handle(e: Ev) {
   if (events.length > 200) events.shift()
   if (e.promptId && e.session) {
     acks.set(e.promptId, e.session)
+    // The row the prompt became. Not its session: the send's answer sets
+    // that (sendPrompt falls back to acks when the answer is lost), at the
+    // moment the page moves to the new session. Set from here, the new
+    // session's view let go of its first prompt before the page moved,
+    // and the prompt was gone for a moment.
     const p = state.pending[e.promptId]
-    if (p && (!p.session || (e.type === 'appended' && e.uuid && !p.row))) {
-      updatePending(e.promptId, { session: e.session, ...(e.type === 'appended' && e.uuid ? { row: e.uuid } : {}) })
-    }
+    if (p && e.type === 'appended' && e.uuid && !p.row) updatePending(e.promptId, { row: e.uuid })
   }
   set({ live: applyEvent(state.live, e) })
   switch (e.type) {

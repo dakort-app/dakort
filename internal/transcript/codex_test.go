@@ -123,6 +123,26 @@ func TestCodexRows(t *testing.T) {
 	}
 }
 
+// A failed turn's task_complete becomes an error row: for want of a
+// login (the line a signed-out codex 0.163.0 wrote on 2026-11-17) with
+// the code the page offers the sign-in on; a usage limit (as in real
+// rollouts) without.
+func TestCodexErrorRows(t *testing.T) {
+	path := writeRollout(t, []string{
+		`{"timestamp":"2026-11-17T14:40:13.716Z","ordinal":11,"type":"event_msg","payload":{"type":"task_complete","turn_id":"t1","last_agent_message":null,"error":{"message":"unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses","codex_error_info":{"http_connection_failed":{"http_status_code":401}}}}}`,
+		`{"timestamp":"2026-11-17T14:41:00.000Z","ordinal":12,"type":"event_msg","payload":{"type":"task_complete","turn_id":"t2","last_agent_message":null,"error":{"message":"You've hit your usage limit.","codex_error_info":"usage_limit_exceeded"}}}`,
+		`{"timestamp":"2026-11-17T14:42:00.000Z","ordinal":13,"type":"event_msg","payload":{"type":"task_complete","turn_id":"t3","last_agent_message":"ok","error":null}}`,
+	})
+	rows, err := (&transcript.Reader{Path: path, Format: "codex"}).All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || !rows[0].APIError || rows[0].Error != "authentication_failed" || !rows[1].APIError || rows[1].Error != "" ||
+		rows[1].Blocks[0].Text != "You've hit your usage limit." {
+		t.Fatalf("rows %+v", rows)
+	}
+}
+
 func TestCodexHeadAndTail(t *testing.T) {
 	path := writeRollout(t, codexLines)
 	info, err := transcript.CodexHead(path, 1<<20)

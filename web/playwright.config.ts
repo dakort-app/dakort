@@ -12,6 +12,12 @@ export default defineConfig({
   // in the project folder for a day, blocking a rename.
   globalTimeout: 6 * 60_000,
   workers: 1,
+  // One retry: on 2026-11-17 a different check failed in about one full
+  // run in three (a PDF, a CSV, a Word file, the old-device login), in the
+  // single old file as in the split ones, and passed when run again. A
+  // pass on the retry is counted as flaky in the summary ship.sh prints; a
+  // real break fails twice and stops the ship.
+  retries: 1,
   use: {
     ...devices['iPhone 15'],
     baseURL: process.env.DAKORT_URL ?? 'http://127.0.0.1:3002',

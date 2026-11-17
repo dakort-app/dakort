@@ -28,6 +28,7 @@ export type Row = {
   model?: string
   stopReason?: string
   apiError?: boolean
+  error?: string // that row's code: "authentication_failed" when the login is missing or has run out
   context?: number // prompt size of the call that wrote an assistant row
   cacheTtl?: string // the prompt cache that call wrote to: "1h" or "5m"
   window?: number // the model's context window, where the transcript says (Codex)

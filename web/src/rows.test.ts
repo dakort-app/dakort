@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { answer, group, promptText, toolSummary, type Part } from './rows'
+import { answer, group, landed, promptText, toolSummary, type Part } from './rows'
 import type { Block, Row } from './types'
 
 let n = 0
@@ -14,6 +14,23 @@ const row = (role: Row['role'], blocks: Block[], extra: Partial<Row> = {}): Row 
   ...extra,
 })
 const text = (t: string): Block => ({ type: 'text', text: t })
+
+describe('a sent prompt landing', () => {
+  const before = [row('user', [text('next')]), row('assistant', [text('done')])]
+  const last = before[1].uuid
+  it('is not the same words sent before it', () => {
+    expect(landed({ text: 'next' }, before, last)).toBe(false)
+  })
+  it('is its words in a row after the send, or the row the stream named', () => {
+    const after = [...before, row('user', [text('next')])]
+    expect(landed({ text: 'next' }, after, last)).toBe(true)
+    expect(landed({ text: 'next', row: after[2].uuid }, after, last)).toBe(true)
+    expect(landed({ text: 'next', row: 'elsewhere' }, after, last)).toBe(false)
+  })
+  it('counts every row of a session that had none at the send', () => {
+    expect(landed({ text: 'next' }, before, '')).toBe(true)
+  })
+})
 
 describe('background task news', () => {
   it('is a line of its own, and the wake-up answer a new reply', () => {
@@ -110,6 +127,15 @@ describe('grouping rows', () => {
       row('assistant', [text('from a subagent')], { sidechain: true }),
     ])
     expect(items.map((i) => (i.kind === 'notice' ? i.tone : i.kind))).toEqual(['divider', 'divider', 'error'])
+  })
+
+  it('marks a lapsed login for the sign-in, not a refresh clash', () => {
+    const items = group([
+      row('assistant', [text('Failed to authenticate: this login reached its time limit and cannot be renewed.')], { apiError: true, error: 'authentication_failed' }),
+      row('assistant', [text('Could not refresh your login because another Claude Code process is refreshing it')], { apiError: true, error: 'authentication_failed' }),
+      row('assistant', [text('API Error: 529')], { apiError: true }),
+    ])
+    expect(items.map((i) => i.kind === 'notice' && !!i.signIn)).toEqual([true, false, false])
   })
 
   it('matches the server on prompt text', () => {

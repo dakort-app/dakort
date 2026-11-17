@@ -174,6 +174,11 @@ type Process struct {
 	stderrMu   sync.Mutex
 	stderrTail []string
 
+	// authFailed: this turn's reply carried authentication_failed; the
+	// result that follows is then a sign-out whatever its words. Read and
+	// written by the stdout reader only.
+	authFailed bool
+
 	exited chan struct{}
 }
 
@@ -351,6 +356,16 @@ func (p *Process) handleLine(line []byte) {
 		return
 	}
 	for _, ev := range parseEvent(line) {
+		switch {
+		case ev.Kind == agent.KindAssistant && ev.Error == "authentication_failed":
+			p.authFailed = true
+		case ev.Kind == agent.KindResult:
+			r := ev.Result
+			if p.authFailed && !r.OK && !strings.Contains(strings.ToLower(r.Text), refreshClash) {
+				r.SignedOut = true
+			}
+			p.authFailed = false
+		}
 		p.queue <- ev
 	}
 }

@@ -463,6 +463,69 @@ func TestNotSignedIn(t *testing.T) {
 	if l.result.OK || !l.result.SignedOut {
 		t.Fatalf("got %+v", l.result)
 	}
+	// The code, not only the words: an expired login says other words
+	// (2026-11-17) with the same code, which Process goes by.
+	coded := false
+	for _, ev := range l.events {
+		coded = coded || ev.Kind == agent.KindAssistant && ev.Error == "authentication_failed"
+	}
+	if !coded {
+		t.Error("no assistant event with error authentication_failed")
+	}
+}
+
+// The six ways claude 2.1.318 words a missing or lapsed login all count
+// as signed out, and a refresh that clashed with another process does
+// not, code or no code. The reply's code makes a sign-out of a result
+// whose words are new.
+func TestSignedOut(t *testing.T) {
+	for _, s := range []string{
+		"Not logged in · Please run /login",
+		"OAuth token revoked · Please run /login",
+		"Login expired · Please run /login",
+		"Login reached its time limit · Please run /login",
+		"Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth login` to sign in again, or use `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN for unattended jobs",
+		"Failed to authenticate: this login reached its time limit · Sign in again to continue",
+	} {
+		if !signedOutText(s) {
+			t.Errorf("not signed out: %q", s)
+		}
+	}
+	clash := "Could not refresh your login because another Claude Code process is refreshing it (or exited mid-refresh) · Try again in a minute"
+	for _, s := range []string{clash, "bad model", "API Error: 529 Overloaded"} {
+		if signedOutText(s) {
+			t.Errorf("signed out: %q", s)
+		}
+	}
+
+	result := func(text string) *agent.Result {
+		p := &Process{queue: make(chan agent.Event, 4)}
+		p.handleLine([]byte(`{"type":"assistant","error":"authentication_failed","message":{"content":[]}}`))
+		b, _ := json.Marshal(map[string]any{"type": "result", "is_error": true, "result": text})
+		p.handleLine(b)
+		<-p.queue
+		return (<-p.queue).Result
+	}
+	if !result("Some new wording · Sign in again").SignedOut {
+		t.Error("the code should make it a sign-out")
+	}
+	if result(clash).SignedOut {
+		t.Error("a refresh clash is not a sign-out")
+	}
+	// The code is per turn: an ordinary failure after it is not a sign-out.
+	p := &Process{queue: make(chan agent.Event, 4)}
+	p.handleLine([]byte(`{"type":"assistant","error":"authentication_failed","message":{"content":[]}}`))
+	p.handleLine([]byte(`{"type":"result","is_error":true,"result":"x"}`))
+	p.handleLine([]byte(`{"type":"result","is_error":true,"result":"bad model"}`))
+	<-p.queue
+	<-p.queue
+	if (<-p.queue).Result.SignedOut {
+		t.Error("the code leaked into the next turn")
+	}
+	// A system row's error is an object; the line still parses.
+	if ev := parseEvent([]byte(`{"type":"system","subtype":"api_error","error":{"status":503}}`))[0]; ev.Kind != agent.KindOther || ev.Error != "" {
+		t.Errorf("object error: %+v", ev)
+	}
 }
 
 // TestCrash kills the CLI from outside mid-turn, as a crash or an OOM would,

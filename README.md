@@ -273,6 +273,13 @@ either takes the code the Claude page gives you or shows the code the
 Codex page asks for. Both work from the phone. Signing in from a
 terminal on the computer works too, as always.
 
+Claude's login lasts about a month, so expect this now and then. On a
+computer nobody ever sits at, `claude setup-token` makes a token that
+lasts much longer, set as `CLAUDE_CODE_OAUTH_TOKEN` in the environment
+Dakort runs in. Claude Code says such tokens are for running the model
+only, so things tied to your account (connectors, for one) may be
+missing in those sessions.
+
 ### The page on the computer asks me to log in. Why?
 
 The browser lost its cookie (a cleared history, a new browser). If you

@@ -17,7 +17,7 @@ type Span = { key: string; first: number; last: number; time: string }
 export type Item =
   | (Span & { kind: 'prompt'; text: string; media: Block[] })
   | (Span & { kind: 'reply'; parts: Part[]; model?: string })
-  | (Span & { kind: 'notice'; tone: 'divider' | 'error' | 'info' | 'output' | 'task'; text: string; detail?: string })
+  | (Span & { kind: 'notice'; tone: 'divider' | 'error' | 'info' | 'output' | 'task'; text: string; detail?: string; signIn?: boolean })
 
 // Context blocks start with a tag: <system-reminder>, <command-name>, ...
 const attachedTag = /^<[a-z][a-z0-9_-]*(\s[^>]*)?>/
@@ -34,6 +34,21 @@ export function promptText(r: Row): string {
     parts.push(t)
   }
   return parts.join('\n\n')
+}
+
+// landed says a sent prompt's row is in: the row the stream named, or, if
+// a gap swallowed that echo, a prompt row with its text that came in after
+// `since` (the last row there when the prompt was sent; '' for none). Only
+// rows from after the send count: the same "next" sent a minute earlier
+// once passed for the new one, and the prompt left the page until its row
+// came (it went by a 2-minute window of timestamps then).
+export function landed(p: { row?: string; text: string }, rows: Row[], since: string): boolean {
+  if (p.row) return rows.findLastIndex((r) => r.uuid === p.row) >= 0
+  // since not among the rows (it always is; prepending keeps it): no
+  // guessing by text.
+  const from = since ? rows.findLastIndex((r) => r.uuid === since) + 1 : 0
+  if (since && !from) return false
+  return rows.slice(from).some((r) => promptText(r) === p.text)
 }
 
 const rowText = (r: Row) => (r.blocks ?? []).map((b) => (b.type === 'text' ? (b.text ?? '') : '')).join('')
@@ -123,7 +138,11 @@ export function group(rows: Row[]): Item[] {
     if (r.role === 'assistant') {
       if (r.apiError) {
         const text = (r.blocks ?? []).map((b) => b.text ?? '').join('\n').trim()
-        push({ kind: 'notice', key: r.uuid, first: i, last: i, time: r.time, tone: 'error', text: text || 'API error' })
+        // A login missing or run out: the page offers the sign-in under it
+        // while it is the last thing in the session (Transcript.tsx). A
+        // refresh that clashed with another process passes by itself.
+        const signIn = r.error === 'authentication_failed' && !/another claude code process is refreshing/i.test(text)
+        push({ kind: 'notice', key: r.uuid, first: i, last: i, time: r.time, tone: 'error', text: text || 'API error', ...(signIn && { signIn }) })
         return
       }
       if (!reply) {

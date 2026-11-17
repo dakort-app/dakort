@@ -61,6 +61,9 @@ type Row struct {
 	Model      string `json:"model,omitempty"`
 	StopReason string `json:"stopReason,omitempty"`
 	APIError   bool   `json:"apiError,omitempty"` // a synthetic assistant row holding an API error
+	// Error is that row's code, "authentication_failed" when the login is
+	// missing or has run out: the page offers the sign-in under it.
+	Error string `json:"error,omitempty"`
 	// Context is the prompt size of the API call that wrote the row (input
 	// plus cache read plus cache creation): the session's context as of
 	// that call. The result event's usage is summed over a turn's calls,
@@ -312,7 +315,8 @@ type rawRow struct {
 	IsCompactSummary  bool            `json:"isCompactSummary"`
 	IsSidechain       bool            `json:"isSidechain"`
 	IsAPIErrorMessage bool            `json:"isApiErrorMessage"`
-	PermissionMode    string          `json:"permissionMode"`
+	Error             json.RawMessage `json:"error"` // a string on assistant rows, an object on system api_error rows
+	PermissionMode   string          `json:"permissionMode"`
 	Subtype           string          `json:"subtype"`
 	Level             string          `json:"level"`
 	Content           json.RawMessage `json:"content"` // system rows: a string
@@ -410,6 +414,9 @@ func (p parser) row(line []byte, start, end int64) (Row, bool) {
 	case "assistant":
 		row.Role = Assistant
 		row.APIError = rr.IsAPIErrorMessage
+		if row.APIError {
+			json.Unmarshal(rr.Error, &row.Error) // a string or nothing
+		}
 		if rr.Message != nil {
 			row.MessageID, row.Model, row.StopReason = rr.Message.ID, rr.Message.Model, rr.Message.StopReason
 			if u := rr.Message.Usage; u != nil {

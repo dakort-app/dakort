@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/dakort-app/dakort/internal/agent"
 	"github.com/dakort-app/dakort/internal/testcwd"
+	"github.com/dakort-app/dakort/internal/transcript"
 )
 
 // These tests run real turns against the installed Codex on the cheapest
@@ -253,12 +255,32 @@ func TestRealImage(t *testing.T) {
 }
 
 // Not signed in (an empty CODEX_HOME, where the rollout lands too): the
-// turn fails, after Codex's own retries, in a way the UI can name.
+// turn fails, after Codex's own retries, in a way the UI can name; and
+// the rollout's last row says the same, so a reloaded page offers the
+// sign-in too.
 func TestRealNotSignedIn(t *testing.T) {
-	p := start(t, Options{Cwd: testcwd.New(t), Env: []string{"CODEX_HOME=" + t.TempDir(), "OPENAI_API_KEY="}})
+	home := t.TempDir()
+	p := start(t, Options{Cwd: testcwd.New(t), Env: []string{"CODEX_HOME=" + home, "OPENAI_API_KEY="}})
 	_, res := turn(t, p, "Reply with the single word ok and nothing else.", true)
 	if res.OK || !res.SignedOut {
 		t.Errorf("result: %+v", res)
+	}
+	var last transcript.Row
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(250 * time.Millisecond) {
+		filepath.WalkDir(home, func(path string, d fs.DirEntry, err error) error {
+			if err == nil && strings.HasSuffix(path, ".jsonl") {
+				if rows, _ := (&transcript.Reader{Path: path, Format: "codex"}).All(); len(rows) > 0 {
+					last = rows[len(rows)-1]
+				}
+			}
+			return nil
+		})
+		if last.APIError {
+			break
+		}
+	}
+	if !last.APIError || last.Error != "authentication_failed" {
+		t.Errorf("rollout's last row: %+v", last)
 	}
 }
 

@@ -15,6 +15,13 @@ type line struct {
 	ParentToolUseID string `json:"parent_tool_use_id"`
 	IsReplay        bool   `json:"isReplay"`
 
+	// assistant: the CLI's code on a synthetic reply that stands for a
+	// failed call, "authentication_failed" when the login is missing or
+	// has run out (measured 2026-11-17, claude 2.1.318). Raw, as other
+	// line types carry an object here and a string field would fail the
+	// whole line.
+	Error json.RawMessage `json:"error"`
+
 	// system/init
 	Model string `json:"model"`
 	Cwd   string `json:"cwd"`
@@ -55,6 +62,30 @@ type line struct {
 	} `json:"modelUsage"`
 }
 
+// The CLI's words for a login that is missing or has run out (claude
+// 2.1.318 holds six; three say "/login", the one first met on 2026-11-17
+// says "claude auth login"), and for a refresh that clashed with another
+// process's, which passes by itself and is no reason to sign in.
+var (
+	signedOutWords = []string{"/login", "auth login", "not logged in", "failed to authenticate", "login expired", "token revoked", "reached its time limit"}
+	refreshClash   = "another claude code process is refreshing"
+)
+
+// signedOutText tells whether a failed turn's text says the CLI must be
+// signed in again.
+func signedOutText(s string) bool {
+	s = strings.ToLower(s)
+	if strings.Contains(s, refreshClash) {
+		return false
+	}
+	for _, w := range signedOutWords {
+		if strings.Contains(s, w) {
+			return true
+		}
+	}
+	return false
+}
+
 // parseEvent turns one non-control stdout line into events.
 func parseEvent(raw []byte) []agent.Event {
 	var l line
@@ -90,6 +121,7 @@ func parseEvent(raw []byte) []agent.Event {
 		}
 	case "assistant":
 		ev.Kind = agent.KindAssistant
+		json.Unmarshal(l.Error, &ev.Error) // a string or nothing
 	case "user":
 		ev.Kind, ev.Replay = agent.KindUser, l.IsReplay
 	case "result":
@@ -106,10 +138,9 @@ func parseEvent(raw []byte) []agent.Event {
 			DurationMS:     l.DurationMS,
 			CostUSD:        l.TotalCostUSD,
 			Usage:          l.Usage,
-			// "Not logged in · Please run /login" with no credentials
-			// (measured 2026-10-29, claude 2.1.307); an expired login
-			// ends the same way.
-			SignedOut: l.IsError && strings.Contains(l.Result, "/login"),
+			// The text alone; Process also sets it from the reply's
+			// authentication_failed code, which survives a rewording.
+			SignedOut: l.IsError && signedOutText(l.Result),
 		}
 		if l.APIErrorStatus != nil {
 			r.APIErrorStatus = *l.APIErrorStatus

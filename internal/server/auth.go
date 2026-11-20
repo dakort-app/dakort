@@ -79,10 +79,30 @@ func (s *Server) auth(next http.Handler) http.Handler {
 	return http.NewCrossOriginProtection().Handler(s.cookie(next))
 }
 
+// installFiles are the UI files a browser fetches to install the app,
+// served without the cookie: the manifest is fetched without credentials
+// (a logged-in phone got the login page in its place and offered no
+// install), and a phone at the login page installs from there. Static
+// files from the build, with nothing about this computer in them; GET only.
+var installFiles = map[string]bool{
+	"/manifest.webmanifest":   true,
+	"/sw.js":                  true,
+	"/offline.html":           true,
+	"/favicon.svg":            true,
+	"/apple-touch-icon.png":   true,
+	"/icons/icon-192.png":     true,
+	"/icons/icon-512.png":     true,
+	"/icons/maskable-512.png": true,
+}
+
 func (s *Server) cookie(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/login", "/api/login", "/api/setup":
+			next.ServeHTTP(w, r)
+			return
+		}
+		if (r.Method == http.MethodGet || r.Method == http.MethodHead) && installFiles[r.URL.Path] {
 			next.ServeHTTP(w, r)
 			return
 		}

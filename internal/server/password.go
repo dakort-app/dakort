@@ -224,8 +224,15 @@ func portOf(r *http.Request) string {
 
 const loginHTML = `<!doctype html>
 <html lang="en"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Dakort">
+<meta name="theme-color" content="#f8f8f8">
 <title>Dakort</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
 <style>
   body { font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; display: grid; place-items: center; min-height: 100dvh; background: #f8f8f8; color: #1f1f1f; }
   form { background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 24px; width: min(320px, 88vw); }

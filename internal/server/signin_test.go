@@ -19,7 +19,12 @@ import (
 // A sign-in started from the page gets the CLI's link (and Codex's
 // one-time code) without a terminal, against throwaway config folders so
 // the real login on this machine is never touched; cancelled before any
-// account is involved.
+// account is involved. BROWSER=true: `claude auth login` opens the
+// default browser at its sign-in page (on a Mac, every test run left a tab
+// in the browser in use) and honours BROWSER as the command to open it
+// with, so true opens nothing; it still prints the link the test reads
+// (claude 2.1.327). `codex login --device-auth` opens no browser, only
+// prints the link and code (codex 0.166.0).
 func TestSignInShowsTheLink(t *testing.T) {
 	claudeBin, errC := claude.FindBinary()
 	codexBin, errX := codex.FindBinary()
@@ -28,7 +33,7 @@ func TestSignInShowsTheLink(t *testing.T) {
 	}
 	root := t.TempDir()
 	s := server.New(server.Config{Token: token, ClaudeBin: claudeBin, CodexBin: codexBin,
-		CLIEnv: []string{"CLAUDE_CONFIG_DIR=" + filepath.Join(root, "claude"), "CODEX_HOME=" + root, "ANTHROPIC_API_KEY=", "OPENAI_API_KEY="},
+		CLIEnv: []string{"CLAUDE_CONFIG_DIR=" + filepath.Join(root, "claude"), "CODEX_HOME=" + root, "ANTHROPIC_API_KEY=", "OPENAI_API_KEY=", "BROWSER=true"},
 		Index:  &index.Index{Root: filepath.Join(root, "projects"), Registry: filepath.Join(root, "sessions")}})
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)

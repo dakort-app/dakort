@@ -7,7 +7,7 @@ import type { Page } from '@playwright/test'
 
 export const token = process.env.DAKORT_TOKEN ?? ''
 
-export type Session = { id: string; folder?: string; cwd?: string; size: number; title: string; heldBy?: number; provider?: string; updated?: string }
+export type Session = { id: string; folder?: string; cwd?: string; size: number; title: string; heldBy?: number; provider?: string; updated?: string; used?: { model?: string } }
 
 // quiet picks the newest Claude session nothing is writing to: not held by
 // a live CLI and no row in the last 10 minutes. The newest session overall

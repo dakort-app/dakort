@@ -935,20 +935,6 @@ html.tab-dragging * {
   border-radius: 6px;
   z-index: 20;
 }
-.idle-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid #555;
-  cursor: pointer;
-}
-.idle-desc {
-  display: block;
-  color: #bbb;
-  margin-top: 2px;
-}
 .drawer {
   width: 280px;
   max-width: 85vw;
@@ -1295,6 +1281,91 @@ html.tab-dragging * {
 .picker-head {
   padding: 4px 10px;
 }
+.chip-btn.open {
+  background: var(--chip-on);
+}
+.chip-btn:focus-visible,
+.picker-row:focus-visible,
+.effort-step:focus-visible,
+.effort-default:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.picker-row:focus {
+  outline: none;
+  background: var(--side);
+}
+/* The agent's mark on the model chip. */
+.chip-btn .agent-icon {
+  vertical-align: -1px;
+  margin-right: 5px;
+}
+/* The model menu's two agents, a page each, turned by a switch of their
+   marks that stays atop the panel while a page scrolls. */
+.picker-tabs {
+  position: sticky;
+  top: -6px; /* the panel's padding */
+  z-index: 1;
+  margin: -6px -6px 4px;
+  padding: 8px 8px 6px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  border-radius: 10px 10px 0 0;
+}
+.picker-seg {
+  display: flex;
+  gap: 2px;
+  width: max-content;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--side);
+}
+.picker-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  font-size: 12.5px;
+  color: var(--faint);
+  cursor: pointer;
+}
+.picker-tab:hover {
+  color: var(--text);
+}
+.picker-tab.on {
+  background: var(--bg);
+  border-color: var(--line);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+.picker-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* One page at a time, each as tall as its rows: no blank space below a
+   short page. */
+.picker-page {
+  min-width: 0;
+}
+.picker-page:not(.on) {
+  display: none;
+}
+/* An agent not installed or not signed in: one sentence with the
+   commands in it, not a row of parts. */
+.picker-row.picker-off {
+  display: block;
+  cursor: default;
+  line-height: 1.5;
+}
+.picker-row.picker-off:hover {
+  background: none;
+}
+.picker-off code {
+  font-size: 11px;
+}
 .picker-row {
   display: flex;
   align-items: center;
@@ -1314,6 +1385,27 @@ html.tab-dragging * {
   border-top: 1px solid var(--line);
   border-radius: 0;
   margin-top: 4px;
+}
+.picker-row.static:not(.picker-switch) {
+  cursor: default;
+}
+/* A setting: its name, and a short caption under it on one line (the
+   full explanation is the row's tooltip). Every setting row is these two
+   lines, so the rows are one height and the controls line up. */
+.row-text {
+  min-width: 0;
+  line-height: 1.3;
+}
+.row-caption {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.picker-row.static:not(.picker-switch):hover {
+  background: none; /* the effort row: its buttons answer, not the row */
 }
 .check {
   font-size: 16px;

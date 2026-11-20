@@ -4,8 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!-- Installed on iOS: the page runs under the status bar, and #root's
+         safe-area padding keeps it clear (styles.css). -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Dakort" />
+    <meta name="theme-color" content="#fdfcfa" />
     <title>Dakort</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <script>
       // The keys were "made.*" before the project was renamed (2026-11-09):
       // carry a device's tabs, drafts and theme over once. Remove after a
@@ -18,6 +26,7 @@
       }
       // Light or dark before the first paint (see src/theme.ts).
       document.documentElement.dataset.theme = localStorage.getItem('dakort.theme') === 'dark' ? 'dark' : 'light'
+      if (document.documentElement.dataset.theme === 'dark') document.querySelector('meta[name=theme-color]').content = '#1f1e1c'
     </script>
     <script type="module" crossorigin src="/app.js"></script>
     <link rel="modulepreload" crossorigin href="/rolldown-runtime.js">

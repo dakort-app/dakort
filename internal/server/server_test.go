@@ -159,6 +159,52 @@ func TestAuth(t *testing.T) {
 	}
 }
 
+// The files a browser installs the app from load without the cookie (the
+// manifest is fetched without credentials), and nothing else does: the
+// app's own scripts, the page and the API still ask for the login, and a
+// path near an install file is not let through.
+func TestInstallFilesBeforeLogin(t *testing.T) {
+	f := setup(t)
+	for path, ctype := range map[string]string{
+		"/manifest.webmanifest":   "application/manifest+json",
+		"/sw.js":                  "text/javascript",
+		"/offline.html":           "text/html",
+		"/favicon.svg":            "image/svg+xml",
+		"/apple-touch-icon.png":   "image/png",
+		"/icons/icon-192.png":     "image/png",
+		"/icons/icon-512.png":     "image/png",
+		"/icons/maskable-512.png": "image/png",
+	} {
+		resp, body := fetch(t, f.srv.URL+path, "")
+		if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), ctype) || len(body) == 0 {
+			t.Errorf("%s without a cookie: %d %q", path, resp.StatusCode, resp.Header.Get("Content-Type"))
+		}
+	}
+	var m struct {
+		Name     string
+		Display  string
+		StartURL string `json:"start_url"`
+		Icons    []struct{ Src, Sizes, Purpose string }
+	}
+	if _, body := fetch(t, f.srv.URL+"/manifest.webmanifest", ""); json.Unmarshal(body, &m) != nil || m.Name != "Dakort" || m.Display != "standalone" || m.StartURL != "/" || len(m.Icons) != 3 {
+		t.Errorf("manifest: %s", body)
+	}
+	for _, ic := range m.Icons {
+		if resp, _ := fetch(t, f.srv.URL+ic.Src, ""); resp.StatusCode != 200 {
+			t.Errorf("manifest icon %s: %d", ic.Src, resp.StatusCode)
+		}
+	}
+	for _, path := range []string{"/", "/index.html", "/app.js", "/index.css", "/icons/", "/icons/other.png", "/sw.js/x", "/manifest.webmanifest.bak", "/api/prefs", "/api/sessions"} {
+		if resp, _ := fetch(t, f.srv.URL+path, ""); resp.StatusCode != 401 {
+			t.Errorf("%s without a cookie: %d, want 401", path, resp.StatusCode)
+		}
+	}
+	// The login page names the manifest, so a phone can install from it.
+	if _, body := fetch(t, f.srv.URL+"/login", ""); !strings.Contains(string(body), `rel="manifest"`) {
+		t.Errorf("the login page has no manifest link")
+	}
+}
+
 // The embedded UI is the committed build of web/: the page and the files
 // it names are all served.
 func TestEmbeddedUI(t *testing.T) {

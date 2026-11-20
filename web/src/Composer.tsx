@@ -46,6 +46,10 @@ export const useLastProvider = () =>
     providerListeners.add(l)
     return () => providerListeners.delete(l)
   }, lastProvider)
+const rememberProvider = (p: string) => {
+  localStorage.setItem(providerKey, p)
+  providerListeners.forEach((l) => l())
+}
 
 // "default" is the CLI's old name for "manual". Sending "default" would
 // clear the session's choice on the server instead of choosing manual.
@@ -143,12 +147,14 @@ export function Composer({ session, folder, onStarted, filesIn }: Props) {
   useEffect(() => {
     if (session?.provider) setProvider(session.provider)
   }, [session?.provider])
-  const pickProvider = (p: string) => {
+  // A new session's agent goes with its model: the model menu lists both.
+  // A session with history keeps its agent; its menu offers no other.
+  const pickProvider = (p: string, c: Choice) => {
     setProvider(p)
-    localStorage.setItem(providerKey, p)
-    providerListeners.forEach((l) => l())
-    setChoice({ model: '', effort: '', ultracode: false, chrome: false }) // the other agent's models
-    if (p === 'codex' && shownMode === 'acceptEdits') setMode('manual')
+    rememberProvider(p)
+    setChoice(c)
+    // Codex has no separate "Edit automatically".
+    if (p === 'codex') setMode((m) => (realMode(m) === 'acceptEdits' ? 'manual' : m))
   }
 
   useEffect(() => {
@@ -509,22 +515,22 @@ export function Composer({ session, folder, onStarted, filesIn }: Props) {
               e.target.value = ''
             }}
           />
-          {/* Which agent: a choice for a new session (when Codex is
-              installed), a label on a Codex session. */}
-          {!id && cfg.codex ? (
-            <span className="chip mode-chip" title="Which agent runs this session">
-              {who}
-              <span className="caret">▾</span>
-              <select value={provider} onChange={(e) => pickProvider(e.target.value)} aria-label="Agent">
-                <option value="claude">Claude</option>
-                <option value="codex">Codex</option>
-              </select>
-            </span>
-          ) : codex ? (
-            <span className="chip">Codex</span>
-          ) : null}
-          <ModelPicker value={choice} onChange={pickChoice} provider={provider} />
-          {id && !turn && !codex && <CacheClock session={id} idleCompact={session?.idleCompact !== false} />}
+          {/* The agent and its model, effort and switches in one menu. */}
+          <ModelPicker
+            value={choice}
+            onChange={pickChoice}
+            onSwitch={id ? undefined : pickProvider}
+            provider={provider}
+            idleCompact={
+              id && !codex
+                ? {
+                    on: session?.idleCompact !== false,
+                    toggle: () => postJSON(`/api/sessions/${id}/settings`, { idleCompact: session?.idleCompact === false }).then(refreshLists, () => {}),
+                  }
+                : undefined
+            }
+          />
+          {id && !turn && !codex && <CacheClock session={id} />}
           {session?.heldBy || context ? (
             <span className="box-info">
               {session?.heldBy ? (
@@ -645,8 +651,9 @@ function ContextSize({ session, context, model }: { session: string; context: nu
 
 // CacheClock counts down the prompt cache from Claude's last reply. Past
 // it, the next message pays to read the whole context in again; tapping
-// says how much that is, and holds the session's idle-compaction switch.
-function CacheClock({ session, idleCompact }: { session: string; idleCompact: boolean }) {
+// says how much that is. (The session's idle-compaction switch is in the
+// model menu, with its other settings.)
+function CacheClock({ session }: { session: string }) {
   const cfg = useConfig()
   const last = useStore((s) => s.lastReply[session])
   const life = useStore((s) => s.cacheLife[session])
@@ -683,19 +690,6 @@ function CacheClock({ session, idleCompact }: { session: string; idleCompact: bo
       {open && (
         <span className="cache-tip small" onClick={() => setOpen(false)}>
           {tip}
-          <span
-            className="idle-row"
-            onClick={(e) => {
-              e.stopPropagation()
-              postJSON(`/api/sessions/${session}/settings`, { idleCompact: !idleCompact }).then(refreshLists, () => {})
-            }}
-          >
-            <span className="grow">
-              Compact when idle
-              <span className="idle-desc">Over 200k, about 5 minutes before the cache expires, so a later message reads a short summary.</span>
-            </span>
-            <span className={'switch' + (idleCompact ? ' on' : '')} role="switch" aria-checked={idleCompact} aria-label="Compact when idle" />
-          </span>
         </span>
       )}
     </span>

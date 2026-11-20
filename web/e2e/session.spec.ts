@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { closeOpened, openSession, seedTabs, quiet, token, type Session } from './helpers'
 
 test.skip(!token, 'DAKORT_TOKEN not set')
@@ -90,12 +90,14 @@ test('the mode chip shows what the session last ran with', async ({ page }) => {
   if (model) await expect(page.locator('.composer .chip-btn')).toContainText(names[model] ?? model)
   console.log(`last model: ${model ?? '(none)'}; chip: ${await page.locator('.composer .chip-btn').textContent()}`)
 
-  // The cache clock's popup holds the idle-compaction switch (on by default).
+  // The cache clock's popup explains the cache; the session's
+  // idle-compaction switch is in the model menu with its other settings.
   const clock = page.locator('.cache-clock')
   if (await clock.count()) {
     await clock.click()
-    await expect(page.getByRole('switch', { name: 'Compact when idle' })).toBeVisible()
-    await page.screenshot({ path: `test-results/idle-switch-${test.info().project.name}.png` })
+    await expect(page.locator('.cache-tip')).toBeVisible()
+    await expect(page.getByRole('switch', { name: 'Compact when idle' })).toHaveCount(0)
+    await clock.click()
   }
 })
 
@@ -406,18 +408,19 @@ test('a new session keeps the model it was sent with', async ({ page }) => {
     route.request().method() === 'POST' ? route.fulfill({ json: { session: fake, promptId: route.request().postDataJSON().promptId } }) : route.fallback(),
   )
   await page.locator('button[aria-label="New session"]').first().click()
-  await page.locator('.composer .chip-btn').click()
-  await page.locator('.picker-panel .picker-row', { hasText: 'Fable' }).click()
+  const chip = page.locator('.composer .model-menu .chip-btn')
+  await chip.click()
+  await page.locator('.picker-panel .picker-page.on .picker-row', { hasText: 'Fable' }).click()
   await page.keyboard.press('Escape')
-  await expect(page.locator('.composer .chip-btn')).toContainText('Fable')
+  await expect(chip).toContainText('Fable')
   await page.locator('.composer textarea').fill('hello')
   await page.locator('.composer textarea').press('Enter')
   await page.waitForTimeout(1000)
-  await expect(page.locator('.composer .chip-btn')).toContainText('Fable')
+  await expect(chip).toContainText('Fable')
 })
 
 // A Codex thread reads like a Claude session: prompts, replies, tool rows,
-// and a Codex chip in the composer with GPT models in the picker; no
+// and OpenAI's mark on the model chip with GPT models in the picker; no
 // prompt-cache clock (Claude's), no slash menu.
 test('a Codex session shows its rows and its own picker', async ({ page }, info) => {
   const sessions: Session[] = await (await page.request.get('/api/sessions', { headers: { Cookie: 'dakort_token=' + token } })).json()
@@ -425,10 +428,10 @@ test('a Codex session shows its rows and its own picker', async ({ page }, info)
   const s = await openSession(page, (l) => l.filter((x) => x.provider === 'codex').sort((a, b) => b.size - a.size)[0])
   console.log(`codex session: ${s.title} (${(s.size / 1e6).toFixed(1)} MB)`)
   await expect(page.locator('.transcript .reply').first()).toBeVisible()
-  await expect(page.locator('.composer .chip', { hasText: 'Codex' })).toBeVisible()
+  await expect(page.locator('.composer .model-menu .chip-btn .agent-icon.codex')).toHaveCount(1)
   await expect(page.locator('.composer .cache-clock')).toHaveCount(0)
   await page.locator('.composer .chip-btn').click()
-  await expect(page.locator('.picker-panel .picker-row', { hasText: /GPT/ }).first()).toBeVisible()
+  await expect(page.locator('.picker-panel .picker-page.on .picker-row', { hasText: /GPT/ }).first()).toBeVisible()
   await expect(page.locator('.picker-panel', { hasText: 'Ultracode' })).toHaveCount(0)
   await expect(page.locator('.picker-panel [aria-label=Chrome]')).toHaveCount(0)
   await page.screenshot({ path: `test-results/codex-${info.project.name}.png` })
@@ -436,6 +439,306 @@ test('a Codex session shows its rows and its own picker', async ({ page }, info)
   await page.locator('.composer textarea').fill('/')
   await expect(page.locator('.slash-menu')).toHaveCount(0)
   await page.locator('.composer textarea').fill('')
+})
+
+// The model menu: one panel for Claude and Codex. Sends are caught here
+// and never reach a CLI.
+async function noSends(page: Page) {
+  const hits: string[] = []
+  await page.route(/\/api\/sessions(\/[^/]+\/send)?$/, (route) => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    hits.push(route.request().url())
+    return route.fulfill({ status: 500, body: 'madetest: no sends' })
+  })
+  return hits
+}
+type Config = { codex?: { models: { id: string; label: string }[] } }
+const config = async (page: Page): Promise<Config> => (await page.request.get('/api/config')).json()
+
+// The model menu's parts, in a pane (or the page).
+const menu = (at: Page | Locator) => {
+  const root = at.locator('.composer .model-menu')
+  return {
+    chip: root.locator('.chip-btn'),
+    panel: root.locator('.picker-panel'),
+    tab: (p: string) => root.locator(`.picker-tab[data-agent=${p}]`),
+    page: (p: string) => root.locator(`.picker-page[data-agent=${p}]`),
+    shown: root.locator('.picker-page.on'),
+  }
+}
+// A Claude session of some size nothing is writing to.
+const settled = (l: Session[]) => l.filter((x) => x.provider !== 'codex' && !x.heldBy).sort((a, b) => a.size - b.size).find((x) => x.size > 100_000) ?? l[0]
+
+// The folder's new-session tab, the only place the agent is chosen.
+async function openNew(page: Page) {
+  const s = await openSession(page, settled)
+  await seedTabs(page, s.folder!, { ids: ['new'], active: 'new' })
+  await page.reload()
+  await expect(page.locator('.tab.active')).toHaveAttribute('data-tab', 'new')
+  await page.locator('.composer textarea').waitFor()
+  return s
+}
+
+// The page on show is as tall as its rows: no blank below the last one,
+// and no scrolling unless the rows outgrow the panel's max height.
+async function fitsItsPage(panel: Locator) {
+  const fit = await panel.evaluate((el) => {
+    el.scrollTop = 0
+    const last = el.querySelector('.picker-page.on')!.lastElementChild!.getBoundingClientRect().bottom
+    const cs = getComputedStyle(el)
+    return {
+      gap: el.getBoundingClientRect().bottom - parseFloat(cs.borderBottomWidth) - parseFloat(cs.paddingBottom) - last,
+      scrolls: el.scrollHeight > el.clientHeight + 1,
+      max: parseFloat(cs.maxHeight),
+      h: el.getBoundingClientRect().height,
+    }
+  })
+  if (!fit.scrolls) expect(Math.abs(fit.gap)).toBeLessThan(2)
+  else expect(fit.h).toBeGreaterThanOrEqual(fit.max - 2) // scrolls only at its max
+}
+
+// A new session's menu turns between Claude and Codex.
+test('the model menu turns between Claude and Codex', async ({ page }, info) => {
+  const sends = await noSends(page)
+  await page.addInitScript(() => localStorage.setItem('dakort.provider', 'claude'))
+  await openNew(page)
+  const cfg = await config(page)
+  const m = menu(page)
+  await expect(m.chip.locator('.agent-icon.claude')).toHaveCount(1)
+  await expect(page.locator('.composer select[aria-label=Agent]')).toHaveCount(0) // no separate agent chooser
+  const before = await m.chip.textContent()
+  await m.chip.click()
+  // The switch: two tabs with the marks, Claude's on, its page on show.
+  await expect(m.panel.locator('[role=tablist] [role=tab]')).toHaveCount(2)
+  await expect(m.tab('claude').locator('.agent-icon.claude')).toHaveCount(1)
+  await expect(m.tab('codex').locator('.agent-icon.codex')).toHaveCount(1)
+  await expect(m.tab('claude')).toHaveAttribute('aria-selected', 'true')
+  await expect(m.page('codex')).toBeHidden()
+  await expect(m.shown).toHaveAttribute('data-agent', 'claude')
+  await expect(m.shown.locator('[role=option][aria-selected=true]')).toHaveCount(1)
+  // The session's settings, all in this panel.
+  await expect(m.shown.getByRole('button', { name: 'Effort Default' })).toBeVisible()
+  await expect(m.shown.locator('.effort-step')).toHaveCount(5)
+  for (const name of ['Ultracode', 'Chrome']) await expect(m.shown.getByRole('switch', { name, exact: true })).toBeVisible()
+  await expect(m.shown.getByRole('switch', { name: 'Compact when idle' })).toHaveCount(0) // nothing to compact yet
+  await fitsItsPage(m.panel)
+  await page.screenshot({ path: `test-results/model-menu-${info.project.name}-claude.png` })
+  const tabsAt = (await m.tab('codex').boundingBox())!
+
+  // Codex's tab: its page, no check, no settings; turning picks nothing.
+  await m.tab('codex').click()
+  await expect(m.tab('codex')).toHaveAttribute('aria-selected', 'true')
+  await expect(m.page('claude')).toBeHidden()
+  await expect(m.shown).toHaveAttribute('data-agent', 'codex')
+  await expect(m.shown.locator('.effort, [role=switch]')).toHaveCount(0)
+  await expect(m.chip).toHaveText(before!)
+  // A mouse click keeps the switch under the pointer (the panel keeps its
+  // height) until the pointer leaves it; then the page takes its own.
+  expect(Math.round((await m.tab('codex').boundingBox())!.y)).toBe(Math.round(tabsAt.y))
+  await page.mouse.move(tabsAt.x + tabsAt.width / 2, tabsAt.y + 200)
+  await expect.poll(() => m.panel.evaluate((el) => el.style.height)).toBe('')
+  await fitsItsPage(m.panel)
+  if (cfg.codex?.models.length) {
+    await expect(m.shown.locator('[role=option]')).toHaveCount(cfg.codex.models.length + 1)
+    await expect(m.shown.locator('[role=option][aria-selected=true]')).toHaveCount(0)
+    await expect(m.shown).not.toContainText('Opens a new') // a pick switches this session, in place
+  } else {
+    await expect(m.shown.locator('.picker-off')).toBeVisible()
+  }
+  await page.screenshot({ path: `test-results/model-menu-${info.project.name}-codex.png` })
+  // Scrolled to the end (a phone's panel scrolls): the switch stays on top.
+  await m.panel.evaluate((el) => (el.scrollTop = el.scrollHeight))
+  expect((await m.tab('codex').boundingBox())!.y - (await m.panel.boundingBox())!.y).toBeLessThan(16)
+  await page.keyboard.press('Escape')
+  await expect(m.panel).toHaveCount(0)
+  // Reopened: back on the session's own page.
+  await m.chip.click()
+  await expect(m.shown).toHaveAttribute('data-agent', 'claude')
+  await page.keyboard.press('Escape')
+
+  // Keyboard: opened from the chip the focus is on the model in use; Right
+  // turns the page and focuses its tab, Down goes into its list, Left back.
+  await m.chip.focus()
+  await page.keyboard.press('ArrowDown')
+  await expect(m.page('claude').locator('[role=option][aria-selected=true]')).toBeFocused()
+  await page.keyboard.press('ArrowRight')
+  await expect(m.tab('codex')).toBeFocused()
+  await expect(m.shown).toHaveAttribute('data-agent', 'codex')
+  if (cfg.codex?.models.length) {
+    await page.keyboard.press('ArrowDown')
+    await expect(m.page('codex').locator('[role=option]').first()).toBeFocused()
+  }
+  await page.keyboard.press('ArrowLeft')
+  await expect(m.tab('claude')).toBeFocused()
+  await expect(m.shown).toHaveAttribute('data-agent', 'claude')
+  await page.keyboard.press('Escape')
+  await expect(m.panel).toHaveCount(0)
+  await expect(m.chip).toBeFocused()
+  await expect(m.chip).toHaveText(before!)
+  // A tap outside closes it.
+  await m.chip.click()
+  await page.locator('.composer textarea').click()
+  await expect(m.panel).toHaveCount(0)
+  expect(sends).toEqual([])
+})
+
+// Codex not installed, or installed and listing no models (signed out):
+// its page stays, with the hint in place of the models.
+test('the model menu says how to get Codex when it is missing or signed out', async ({ page }, info) => {
+  const sends = await noSends(page)
+  let installed = false
+  await page.route('**/api/config', async (route) => {
+    const res = await route.fetch()
+    const c = await res.json()
+    c.clis = (c.clis ?? []).map((x: { name: string }) => (x.name === 'codex' ? { ...x, found: installed, install: 'npm install -g @openai/codex' } : x))
+    delete c.codex
+    await route.fulfill({ response: res, json: c })
+  })
+  await page.addInitScript(() => localStorage.setItem('dakort.provider', 'claude'))
+  await openNew(page)
+  const m = menu(page)
+  await m.chip.click()
+  await m.tab('codex').click()
+  await expect(m.shown).toHaveAttribute('data-agent', 'codex')
+  const off = m.shown.locator('.picker-off')
+  await expect(off).toContainText('Not installed')
+  await expect(off.locator('code').first()).toHaveText('npm install -g @openai/codex')
+  await expect(m.shown.locator('[role=option]')).toHaveCount(0)
+  // The pointer off the switch: the page takes its own height.
+  const at = (await m.tab('codex').boundingBox())!
+  await page.mouse.move(at.x + at.width / 2, at.y + 200)
+  await expect.poll(() => m.panel.evaluate((el) => el.style.height)).toBe('')
+  await fitsItsPage(m.panel)
+  await page.screenshot({ path: `test-results/model-menu-${info.project.name}-nocodex.png` })
+  await page.keyboard.press('Escape')
+
+  installed = true
+  await page.reload()
+  await page.locator('.composer textarea').waitFor()
+  await m.chip.click()
+  await m.tab('codex').click()
+  await expect(off).toContainText('Codex listed no models')
+  await expect(off.locator('code').first()).toHaveText('codex')
+  await expect(m.shown.locator('[role=option]')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  expect(sends).toEqual([])
+})
+
+// Compact when idle left the cache clock's popup for the model menu: the
+// switch saves at once (the test server's own settings), a reload keeps
+// it, and it is put back after.
+test('compact when idle is a switch in the model menu', async ({ page }) => {
+  const s = await openSession(page, settled)
+  const m = menu(page)
+  const sw = m.shown.getByRole('switch', { name: 'Compact when idle' })
+  const saved = async () => ((await (await page.request.get('/api/sessions')).json()) as (Session & { idleCompact?: boolean })[]).find((x) => x.id === s.id)?.idleCompact !== false
+  const was = await saved()
+  await m.chip.click()
+  await expect(sw).toHaveAttribute('aria-checked', String(was))
+  await sw.click()
+  await expect.poll(saved).toBe(!was)
+  await expect(sw).toHaveAttribute('aria-checked', String(!was))
+  await expect(m.panel).toBeVisible() // a switch keeps the panel open
+  await page.reload()
+  await page.locator('.transcript [data-anchor]').first().waitFor()
+  await m.chip.click()
+  await expect(sw).toHaveAttribute('aria-checked', String(!was))
+  await sw.click()
+  await expect.poll(saved).toBe(was)
+  await page.keyboard.press('Escape')
+})
+
+// The agent is chosen when a session starts. A session with history
+// keeps its own: its menu has no switch and no other agent's models, only
+// its own with its settings, each a name and a one-line caption (the full
+// explanation in the row's tooltip). Nothing is sent.
+test('a session with history offers only its own agent', async ({ page }, info) => {
+  const sends = await noSends(page)
+  // One last run on a model the menu lists, or on none (Default is ticked):
+  // an older id (claude-opus-5) is kept as it is, so no row carries the tick.
+  await page.goto('/login?token=' + token)
+  const cfg = await (await page.request.get('/api/config')).json()
+  const listed = new Set<string>((cfg.claude?.models ?? []).map((m: { full: string }) => m.full))
+  const onListed = (x: Session) => !x.used?.model || listed.has(x.used.model.replace(/\[.*$/, ''))
+  await openSession(page, (l) => settled(l.filter(onListed)))
+  const m = menu(page)
+  await expect(m.chip.locator('.agent-icon.claude')).toHaveCount(1)
+  await m.chip.click()
+  await expect(m.panel).toBeVisible()
+  await expect(m.panel.locator('[role=tablist], [role=tab]')).toHaveCount(0)
+  await expect(m.panel.locator('.picker-page')).toHaveCount(1)
+  await expect(m.shown).toHaveAttribute('data-agent', 'claude')
+  await expect(m.shown.locator('[role=option]', { hasText: /GPT/ })).toHaveCount(0)
+  await expect(m.shown.locator('[role=option][aria-selected=true]')).toHaveCount(1)
+  await expect(m.panel).not.toContainText('Opens a new')
+  // The settings: Effort without its pick in brackets (the Default pill
+  // says it), and every caption on one line at this width.
+  const effort = m.shown.locator('.picker-row.static').first()
+  await expect(effort.locator('.row-label')).toHaveText('Effort')
+  for (const name of ['Ultracode', 'Chrome', 'Compact when idle']) {
+    const row = m.shown.getByRole('switch', { name, exact: true })
+    await expect(row).toBeVisible()
+    await expect(row).toHaveAttribute('title', /.{20,}/)
+  }
+  const captions = await m.shown.locator('.row-caption').evaluateAll((els) =>
+    els.map((c) => ({ text: c.textContent, cut: c.scrollWidth > c.clientWidth + 1, lines: Math.round(c.getBoundingClientRect().height / parseFloat(getComputedStyle(c).lineHeight)) })),
+  )
+  expect(captions.length).toBe(4)
+  for (const c of captions) expect(c, c.text!).toMatchObject({ cut: false, lines: 1 })
+  // The rows are one height, the switches in one column.
+  const rows = await m.shown.locator('.picker-row.static').evaluateAll((els) => els.map((r) => r.getBoundingClientRect().height))
+  expect(Math.max(...rows) - Math.min(...rows)).toBeLessThan(3)
+  const knobs = await m.shown.locator('.picker-switch .switch').evaluateAll((els) => els.map((k) => Math.round(k.getBoundingClientRect().right)))
+  expect(new Set(knobs).size).toBe(1)
+  await page.screenshot({ path: `test-results/model-menu-${info.project.name}-history.png` })
+  await page.keyboard.press('Escape')
+  expect(sends).toEqual([])
+})
+
+// In a new session nothing needs carrying: a Codex model makes it a Codex
+// session, in place, and the panel stays open on that page, now the
+// session's own, for the effort. And back to Claude the same way.
+test('a Codex model in an empty session switches it to Codex', async ({ page }) => {
+  const sends = await noSends(page)
+  await page.addInitScript(() => localStorage.setItem('dakort.provider', 'claude'))
+  const s = await openSession(page, settled)
+  const cfg = await config(page)
+  test.skip(!cfg.codex?.models.length, 'Codex lists no models here')
+  const target = cfg.codex!.models[0]
+  await seedTabs(page, s.folder!, { ids: ['new'], active: 'new' })
+  await page.reload()
+  await expect(page.locator('.tab.active')).toHaveAttribute('data-tab', 'new')
+  await expect(page.locator('.tab.active .agent-icon.claude')).toHaveCount(1)
+  const m = menu(page)
+  await m.chip.click()
+  await expect(m.shown).toHaveAttribute('data-agent', 'claude')
+  // A new session has no idle compaction to set yet.
+  await expect(m.shown.getByRole('switch', { name: 'Compact when idle' })).toHaveCount(0)
+  await m.tab('codex').click()
+  // Turned, not switched; no note: nothing to carry.
+  await expect(page.locator('.tab.active .agent-icon.claude')).toHaveCount(1)
+  await expect(m.shown.locator('.picker-page-note')).toHaveCount(0)
+  await m.shown.locator('[role=option]', { hasText: target.label }).first().click()
+  // Switched in place; the panel stays on Codex's page, now the session's.
+  await expect(page.locator('.tab.active')).toHaveAttribute('data-tab', 'new')
+  await expect(page.locator('.tab.active .agent-icon.codex')).toHaveCount(1)
+  await expect(m.chip.locator('.agent-icon.codex')).toHaveCount(1)
+  await expect(m.chip).toContainText(target.label)
+  await expect(m.shown).toHaveAttribute('data-agent', 'codex')
+  await expect(m.shown.locator('[role=option][aria-selected=true]')).toContainText(target.label)
+  await expect(m.shown.locator('.effort')).toHaveCount(1)
+  await expect(m.shown.getByRole('switch')).toHaveCount(0) // Ultracode and Chrome are Claude's
+  await expect(page.locator('.composer textarea')).toHaveAttribute('placeholder', 'Start a new session in this project')
+  await page.keyboard.press('Escape')
+  await m.chip.click()
+  await expect(m.shown).toHaveAttribute('data-agent', 'codex')
+  await m.tab('claude').click()
+  await m.shown.locator('[role=option]').nth(1).click()
+  await expect(m.chip.locator('.agent-icon.claude')).toHaveCount(1)
+  await expect(page.locator('.tab.active .agent-icon.claude')).toHaveCount(1)
+  await expect(m.shown.getByRole('switch', { name: 'Ultracode' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  expect(sends).toEqual([])
 })
 
 // A session ending on a lapsed login (the row the CLI wrote on 2026-11-17,

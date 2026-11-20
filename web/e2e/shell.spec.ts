@@ -542,3 +542,44 @@ test('the devices panel asks for a password once, then shows the address and a c
   await expect(sheet).toContainText('not running')
   await expect(sheet.locator('.devices-addr')).toHaveCount(0)
 })
+
+// Installable: the page names the manifest and the iOS meta, the manifest
+// and its icons load without the cookie (a browser fetches the manifest
+// without credentials), and the service worker registers and takes the
+// page. The API still refuses a request without the cookie.
+test('the app is installable: manifest, icons and a service worker', async ({ browser, playwright }, info) => {
+  const bare = await playwright.request.newContext({ baseURL: info.project.use.baseURL })
+  try {
+    const res = await bare.get('/manifest.webmanifest')
+    expect(res.status()).toBe(200)
+    const m = await res.json()
+    expect(m).toMatchObject({ name: 'Dakort', short_name: 'Dakort', start_url: '/', scope: '/', display: 'standalone' })
+    expect(m.icons.map((i: { sizes: string; purpose: string }) => i.sizes + ' ' + i.purpose)).toEqual(['192x192 any', '512x512 any', '512x512 maskable'])
+    for (const p of [...m.icons.map((i: { src: string }) => i.src), '/apple-touch-icon.png', '/sw.js']) expect((await bare.get(p)).status(), p).toBe(200)
+    expect((await bare.get('/api/sessions')).status()).toBe(401)
+    expect((await bare.get('/app.js')).status()).toBe(401)
+  } finally {
+    await bare.dispose()
+  }
+
+  // The config blocks service workers for the other checks (page.route).
+  const ctx = await browser.newContext({ ...info.project.use, serviceWorkers: 'allow' })
+  try {
+    const page = await ctx.newPage()
+    await openSession(page, quiet)
+    await expect(page.locator('head link[rel=manifest]')).toHaveAttribute('href', '/manifest.webmanifest')
+    await expect(page.locator('head link[rel=apple-touch-icon]')).toHaveAttribute('href', '/apple-touch-icon.png')
+    await expect(page.locator('head meta[name=apple-mobile-web-app-capable]')).toHaveAttribute('content', 'yes')
+    await expect(page.locator('head meta[name=viewport]')).toHaveAttribute('content', /viewport-fit=cover/)
+    const supported = await page.evaluate(() => 'serviceWorker' in navigator && window.isSecureContext)
+    test.skip(!supported, 'no service workers in this browser on this address')
+    const sw = await page.evaluate(async () => {
+      const r = await navigator.serviceWorker.ready
+      return { scope: r.scope, script: r.active?.scriptURL ?? '' }
+    })
+    expect(new URL(sw.scope).pathname).toBe('/')
+    expect(new URL(sw.script).pathname).toBe('/sw.js')
+  } finally {
+    await ctx.close()
+  }
+})

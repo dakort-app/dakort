@@ -11,8 +11,16 @@ export const isDark = () => localStorage.getItem(key) === 'dark'
 
 export function setDark(dark: boolean) {
   localStorage.setItem(key, dark ? 'dark' : 'light')
-  document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+  apply(dark)
   listeners.forEach((f) => f())
+}
+
+// The page's theme, and the browser's own bar (theme-color: the installed
+// app's title bar, a phone's status bar) in the page's background.
+function apply(dark: boolean) {
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+  const meta = document.querySelector<HTMLMetaElement>('meta[name=theme-color]')
+  if (meta) meta.content = dark ? '#1f1e1c' : '#fdfcfa'
 }
 
 export function onTheme(f: () => void): () => void {
@@ -20,4 +28,4 @@ export function onTheme(f: () => void): () => void {
   return () => listeners.delete(f)
 }
 
-document.documentElement.dataset.theme = isDark() ? 'dark' : 'light'
+apply(isDark())

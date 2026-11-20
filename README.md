@@ -146,6 +146,12 @@ The icon is always there, for the address again or a new password. If
 Tailscale is off or missing, the panel says so. Without it, Dakort is on
 the computer only, and picks Tailscale up when it is installed later.
 
+**On the home screen.** Once the phone is logged in, add the page to the
+home screen (Share, then Add to Home Screen on an iPhone; the browser
+menu, then Add to Home screen or Install on Android) and Dakort opens
+full screen, with its own icon, like an app. On Android the install
+offer needs HTTPS, so set up `dakort setup -https` first, as below.
+
 The connection is encrypted by Tailscale itself; the page
 goes over plain HTTP inside it. For HTTPS on the tailnet, with the lock
 icon, `dakort setup -https` puts it behind Tailscale Serve, which needs

@@ -21,10 +21,10 @@ export default defineConfig({
   use: {
     ...devices['iPhone 15'],
     baseURL: process.env.DAKORT_URL ?? 'http://127.0.0.1:3002',
-    // The app's service worker (public/sw.js) would take the page, and
-    // requests a controlled page makes slip past page.route, which most
-    // checks play the server's answers through. The check of the worker
-    // itself opens a context that allows it.
+    // The app has no service worker now; blocked still, since requests a
+    // controlled page makes slip past page.route, which most checks play
+    // the server's answers through. The check that one is removed opens a
+    // context that allows them.
     serviceWorkers: 'block',
   },
   projects: [

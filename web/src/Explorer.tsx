@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { getJSON, HTTPError, postJSON } from './api'
 import { fileURL } from './FileView'
 import { FileIcon, FolderIcon } from './icons'
@@ -13,14 +13,27 @@ import { filesChanged, useStore } from './store'
 
 type Entry = { name: string; dir?: boolean; size: number; mtime?: string }
 
+// What the tree showed, by project. On a phone the drawer closes when a
+// file opens and the explorer goes with it, so coming back started at the
+// top with every folder shut.
+const kept = new Map<string, { open: Set<string>; lists: Record<string, Entry[]>; scroll: number }>()
+
 const time = (e: Entry) => Date.parse(e.mtime ?? '') || 0
 const newestFirst = (l: Entry[]) => [...l].sort((a, b) => +!!b.dir - +!!a.dir || time(b) - time(a))
 
 type Props = { root: string; onOpen: (path: string) => void; active?: string; byName?: boolean }
 
 export function Explorer({ root, onOpen, active, byName }: Props) {
-  const [open, setOpen] = useState<Set<string>>(() => new Set(['']))
-  const [lists, setLists] = useState<Record<string, Entry[]>>({})
+  const [open, setOpen] = useState<Set<string>>(() => kept.get(root)?.open ?? new Set(['']))
+  const [lists, setLists] = useState<Record<string, Entry[]>>(() => kept.get(root)?.lists ?? {})
+  const box = useRef<HTMLDivElement>(null)
+  const scroll = useRef(kept.get(root)?.scroll ?? 0)
+  useEffect(() => {
+    kept.set(root, { open, lists, scroll: scroll.current })
+  }, [root, open, lists])
+  useLayoutEffect(() => {
+    if (box.current) box.current.scrollTop = scroll.current
+  }, [])
   const [err, setErr] = useState('')
   const ended = useStore((s) => s.live.ended)
   const changed = useStore((s) => s.files)
@@ -128,7 +141,15 @@ export function Explorer({ root, onOpen, active, byName }: Props) {
     })
 
   return (
-    <div className="explorer">
+    <div
+      className="explorer"
+      ref={box}
+      onScroll={(e) => {
+        scroll.current = e.currentTarget.scrollTop
+        const k = kept.get(root)
+        if (k) k.scroll = scroll.current
+      }}
+    >
       {err && <div className="error small pad">{err}</div>}
       {rows('', 0)}
       {lists[''] && !lists[''].length && <div className="faint small pad">Empty folder.</div>}

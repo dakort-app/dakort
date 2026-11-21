@@ -545,9 +545,10 @@ test('the devices panel asks for a password once, then shows the address and a c
 
 // Installable: the page names the manifest and the iOS meta, the manifest
 // and its icons load without the cookie (a browser fetches the manifest
-// without credentials), and the service worker registers and takes the
-// page. The API still refuses a request without the cookie.
-test('the app is installable: manifest, icons and a service worker', async ({ browser, playwright }, info) => {
+// without credentials). The API still refuses a request without the
+// cookie. A service worker left from an earlier version (it kept copies of
+// the app's files, and an iPhone kept a fixed bug) is removed on the visit.
+test('the app is installable, and an old service worker is removed', async ({ browser, playwright }, info) => {
   const bare = await playwright.request.newContext({ baseURL: info.project.use.baseURL })
   try {
     const res = await bare.get('/manifest.webmanifest')
@@ -562,7 +563,6 @@ test('the app is installable: manifest, icons and a service worker', async ({ br
     await bare.dispose()
   }
 
-  // The config blocks service workers for the other checks (page.route).
   const ctx = await browser.newContext({ ...info.project.use, serviceWorkers: 'allow' })
   try {
     const page = await ctx.newPage()
@@ -573,12 +573,15 @@ test('the app is installable: manifest, icons and a service worker', async ({ br
     await expect(page.locator('head meta[name=viewport]')).toHaveAttribute('content', /viewport-fit=cover/)
     const supported = await page.evaluate(() => 'serviceWorker' in navigator && window.isSecureContext)
     test.skip(!supported, 'no service workers in this browser on this address')
-    const sw = await page.evaluate(async () => {
-      const r = await navigator.serviceWorker.ready
-      return { scope: r.scope, script: r.active?.scriptURL ?? '' }
+    // A phone's leftover: a worker at /sw.js with a saved copy.
+    await page.evaluate(async () => {
+      await navigator.serviceWorker.register('/sw.js')
+      await (await caches.open('dakort-v1')).put('/madetest-kept', new Response('old'))
     })
-    expect(new URL(sw.scope).pathname).toBe('/')
-    expect(new URL(sw.script).pathname).toBe('/sw.js')
+    await page.reload()
+    await expect
+      .poll(() => page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).length + (await caches.keys()).length))
+      .toBe(0)
   } finally {
     await ctx.close()
   }

@@ -536,7 +536,7 @@ export function Workspace({ folder }: { folder: string }) {
                 </button>
               </span>
             </div>
-            <Explorer root={folder} onOpen={(path) => openFile(path)} active={activeFile} byName={byName} />
+            <Explorer key={folder} root={folder} onOpen={(path) => openFile(path)} active={activeFile} byName={byName} />
           </aside>
         )}
         {/* On a phone a tap anywhere beside the drawer closes it (hidden on a laptop). */}

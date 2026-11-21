@@ -115,7 +115,11 @@ func TestReleaseNotice(t *testing.T) {
 	root := t.TempDir()
 	s := New(Config{Token: "tok", Version: "v0.1.0",
 		Index:   &index.Index{Root: filepath.Join(root, "projects"), Registry: filepath.Join(root, "sessions")},
-		Release: ReleaseConfig{On: true, API: gh.URL, First: 500 * time.Millisecond, Every: 50 * time.Millisecond}}) // First: the stream below connects before the first ask
+		// First: the stream below connects before the first ask. The event is
+		// sent once, so a stream that connects late never sees it: 500 ms
+		// was too short when every package's tests ran at once (it failed a
+		// publish), so the margin is 3 s.
+		Release: ReleaseConfig{On: true, API: gh.URL, First: 3 * time.Second, Every: 50 * time.Millisecond}})
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	t.Cleanup(s.Close)
@@ -130,7 +134,7 @@ func TestReleaseNotice(t *testing.T) {
 		t.Cleanup(func() { resp.Body.Close() })
 		return bufio.NewScanner(resp.Body)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	sc := stream(ctx)
 	for sc.Scan() {
@@ -143,7 +147,7 @@ func TestReleaseNotice(t *testing.T) {
 		}
 	}
 	if sc.Err() != nil {
-		t.Fatal("no release event within 5 s")
+		t.Fatal("no release event within 10 s")
 	}
 
 	// Asked again since (Every is short), announced once.

@@ -1,6 +1,9 @@
-import * as pdfjs from 'pdfjs-dist'
-import { TextLayer, type PDFDocumentProxy } from 'pdfjs-dist'
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+// The legacy build: pdf.js 6 calls Map.getOrInsertComputed, which the
+// iPhone's Safari of 2026-11-20 lacks ("this.#t.getOrInsertComputed is not
+// a function", no PDF opened); the legacy build carries it, for 120 KB.
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs'
+import { TextLayer, type PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs'
+import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { getJSON, HTTPError } from './api'
 import { FindBar } from './FindBar'

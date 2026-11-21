@@ -168,7 +168,6 @@ func TestInstallFilesBeforeLogin(t *testing.T) {
 	for path, ctype := range map[string]string{
 		"/manifest.webmanifest":   "application/manifest+json",
 		"/sw.js":                  "text/javascript",
-		"/offline.html":           "text/html",
 		"/favicon.svg":            "image/svg+xml",
 		"/apple-touch-icon.png":   "image/png",
 		"/icons/icon-192.png":     "image/png",

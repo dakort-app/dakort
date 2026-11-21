@@ -655,6 +655,31 @@ test('the explorer keeps its shown or hidden state across a folder switch', asyn
   await expect(page.locator('.explorer-panel')).toHaveCount(1)
 })
 
+// On a phone, opening a file closes the drawer; opened again, the folder
+// it came from is still open (it used to start over, every folder shut).
+// The folder and its file are served by the test.
+test('the phone drawer keeps its open folders after a file opens', async ({ page }, info) => {
+  test.skip(info.project.name === 'desktop', 'the explorer stays shown on a laptop')
+  const dir = 'madetest-deep'
+  const name = dir + '/madetest-notes.md'
+  await page.route(/\/api\/files\/list\?/, async (route) => {
+    const p = new URL(route.request().url()).searchParams.get('path')
+    if (p === dir) return route.fulfill({ json: [{ name: 'madetest-notes.md', size: 10, mtime: new Date().toISOString() }] })
+    if (p !== '') return route.fallback()
+    const list = await (await route.fetch()).json()
+    return route.fulfill({ json: [{ name: dir, dir: true, size: 0, mtime: new Date().toISOString() }, ...list] })
+  })
+  await serveNotes(page, name)
+  await openSession(page, (l) => l[0])
+  await page.getByRole('button', { name: 'Show the sidebar' }).click()
+  const panel = page.locator('.explorer-panel')
+  await panel.locator('.tree-row', { hasText: dir }).click()
+  await panel.locator('.tree-row', { hasText: 'madetest-notes.md' }).click()
+  await expect(panel).toHaveCount(0)
+  await page.getByRole('button', { name: 'Show the sidebar' }).click()
+  await expect(panel.locator('.tree-row', { hasText: 'madetest-notes.md' })).toBeVisible()
+})
+
 // A Markdown file served by the test, so nothing is written into a real
 // folder: stat and raw for this one name are answered here.
 async function serveNotes(page: Page, name: string) {

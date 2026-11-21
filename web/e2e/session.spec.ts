@@ -86,8 +86,11 @@ test('the mode chip shows what the session last ran with', async ({ page }) => {
   // And the model chip: the last reply's model, not the global default.
   const list: { id: string; used?: { model?: string } }[] = await (await page.request.get('/api/sessions')).json()
   const model = list.find((x) => x.id === s.id)?.used?.model
-  const names: Record<string, string> = { 'claude-opus-5-5': 'Opus 5.5', 'claude-fable-5-1': 'Fable 5.1', 'claude-sonnet-5-5': 'Sonnet 5.5', 'claude-haiku-5-5': 'Haiku 5.5' }
-  if (model) await expect(page.locator('.composer .chip-btn')).toContainText(names[model] ?? model)
+  // The names are the CLI's own (the list the page shows), so a new model
+  // on this machine needs no change here; an id the list lacks shows as is.
+  const cfg = await (await page.request.get('/api/config')).json()
+  const names: Record<string, string> = Object.fromEntries((cfg.claude?.models ?? []).map((m: { full: string; label: string }) => [m.full, m.label]))
+  if (model) await expect(page.locator('.composer .chip-btn')).toContainText(names[model.replace(/\[.*$/, '')] ?? model)
   console.log(`last model: ${model ?? '(none)'}; chip: ${await page.locator('.composer .chip-btn').textContent()}`)
 
   // The cache clock's popup explains the cache; the session's
@@ -584,6 +587,37 @@ test('the model menu turns between Claude and Codex', async ({ page }, info) => 
 
 // Codex not installed, or installed and listing no models (signed out):
 // its page stays, with the hint in place of the models.
+// A page stays open for days, and a CLI update brings a model it has not
+// seen: the menu asks for the list again as it opens, so the model is
+// there without a reload. Nothing is sent.
+test('a model the CLI gains shows in an open page', async ({ page }) => {
+  const sends = await noSends(page)
+  let gained = false
+  let asks = 0
+  await page.route('**/api/config', async (route) => {
+    asks++
+    const res = await route.fetch()
+    const c = await res.json()
+    if (gained && c.claude?.models) c.claude.models = [...c.claude.models, { id: 'madetest', full: 'claude-madetest-9', label: 'Madetest 9', desc: 'Not a model' }]
+    await route.fulfill({ response: res, json: c })
+  })
+  await page.addInitScript(() => localStorage.setItem('dakort.provider', 'claude'))
+  await openNew(page)
+  const m = menu(page)
+  await expect(m.chip).toBeVisible()
+  const before = asks
+  gained = true
+  await m.chip.click()
+  await expect(m.shown.getByRole('option', { name: /Madetest 9/ })).toBeVisible()
+  expect(asks).toBe(before + 1)
+  // Opening again within the minute asks nothing more.
+  await page.keyboard.press('Escape')
+  await m.chip.click()
+  await expect(m.shown.getByRole('option', { name: /Madetest 9/ })).toBeVisible()
+  expect(asks).toBe(before + 1)
+  expect(sends).toEqual([])
+})
+
 test('the model menu says how to get Codex when it is missing or signed out', async ({ page }, info) => {
   const sends = await noSends(page)
   let installed = false

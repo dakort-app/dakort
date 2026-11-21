@@ -28,10 +28,33 @@ export const releasesURL = 'https://github.com/dakort-app/dakort/releases'
 let config: Promise<Config> | null = null
 export const loadConfig = () => (config ??= getJSON<Config>('/api/config').catch(() => ({})))
 
+// A page can stay open for days, and the CLI's models change under it (a
+// CLI update brings a new one). refreshConfig asks again, at most once a
+// minute, and hands the answer to everything that showed the old one; a
+// failed ask keeps what there is. The server holds the CLI's list for an
+// hour, so asking often starts no CLI.
+const listeners = new Set<(c: Config) => void>()
+export const onConfig = (fn: (c: Config) => void) => {
+  listeners.add(fn)
+  return () => void listeners.delete(fn)
+}
+let asked = 0
+export function refreshConfig(now = Date.now()) {
+  if (now - asked < 60_000) return
+  asked = now
+  getJSON<Config>('/api/config')
+    .then((c) => {
+      config = Promise.resolve(c)
+      listeners.forEach((fn) => fn(c))
+    })
+    .catch(() => {})
+}
+
 export function useConfig(): Config {
   const [cfg, setCfg] = useState<Config>({})
   useEffect(() => {
     loadConfig().then(setCfg)
+    return onConfig(setCfg)
   }, [])
   return cfg
 }

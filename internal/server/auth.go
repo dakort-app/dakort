@@ -87,7 +87,6 @@ func (s *Server) auth(next http.Handler) http.Handler {
 var installFiles = map[string]bool{
 	"/manifest.webmanifest":   true,
 	"/sw.js":                  true,
-	"/offline.html":           true,
 	"/favicon.svg":            true,
 	"/apple-touch-icon.png":   true,
 	"/icons/icon-192.png":     true,

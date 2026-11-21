@@ -1,5 +1,5 @@
 import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
-import { loadConfig, useConfig, type ClaudeModel, type Config } from './config'
+import { loadConfig, onConfig, refreshConfig, useConfig, type ClaudeModel, type Config } from './config'
 import { AgentIcon, GlobeIcon } from './icons'
 import { MenuOption, MenuSwitch, PopMenu, RowText } from './PopMenu'
 
@@ -26,14 +26,16 @@ export type Choice = { model: string; effort: string; ultracode: boolean; chrome
 // one stands in until it arrives, and when the CLI cannot be asked.
 const fallback: ClaudeModel[] = [
   { id: 'opus', full: 'claude-opus-5-5', label: 'Opus 5.5', desc: 'Complex work and everyday tasks' },
-  { id: 'fable', full: 'claude-fable-5-1', label: 'Fable 5.1', desc: 'The hardest problems' },
+  { id: 'fable', full: 'claude-fable-5-2', label: 'Fable 5.2', desc: 'The hardest problems' },
   { id: 'sonnet', full: 'claude-sonnet-5-5', label: 'Sonnet 5.5', desc: 'Efficient for simpler tasks' },
   { id: 'haiku', full: 'claude-haiku-5-5', label: 'Haiku 5.5', desc: 'Fastest, for quick answers' },
 ]
 let models = fallback
-loadConfig().then((cfg: Config) => {
+const take = (cfg: Config) => {
   if (cfg.claude?.models.length) models = cfg.claude.models
-})
+}
+loadConfig().then(take)
+onConfig(take) // a later answer (the panel asks again as it opens)
 const efforts = ['low', 'medium', 'high', 'xhigh', 'max']
 const effortLabel = (e: string) => (e === 'xhigh' ? 'XHigh' : e ? e[0].toUpperCase() + e.slice(1) : 'Default')
 
@@ -252,6 +254,7 @@ export function ModelPicker({ value, onChange, onSwitch, provider, idleCompact }
       onOpen={() => {
         release()
         setPage(current)
+        refreshConfig() // in the background; the panel shows what it has
       }}
       chip={
         <>

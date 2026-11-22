@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { join } from './FileView'
-import { isRelative, loadMath, mathReady, render } from './mdrender'
+import { isRelative, join, loadMath, mathReady, render } from './mdrender'
 
 const resolve = (href: string, kind: 'image' | 'link') => (kind === 'image' ? '/raw?p=' + href : '#')
 

@@ -67,9 +67,12 @@ test('a big session at phone size, with older pages loading in place', async ({ 
 
 // The mode chip offers VS Code's four modes plus Bypass, and shows the mode
 // the session's transcript says it last ran with (a terminal's "auto" once
-// came up as the global default, "Ask before edits").
+// came up as the global default, "Ask before edits"). A quiet session whose
+// last mode the list found: the index reads 4 MB back for it (usedMax), and
+// on 2026-11-21 the pick's last typed message sat 9.7 MB before the end,
+// one long turn later, so the chip rightly fell back to Auto.
 test('the mode chip shows what the session last ran with', async ({ page }) => {
-  const s = await openSession(page, quiet)
+  const s = await openSession(page, (l) => quiet(l.filter((x) => x.used?.mode).length ? l.filter((x) => x.used?.mode) : l))
   const tail: { rows: { role: string; permissionMode?: string }[] } = await (await page.request.get(`/api/sessions/${s.id}/rows?n=200`)).json()
   const last = tail.rows.filter((r) => r.role === 'user' && r.permissionMode).pop()?.permissionMode
   const chip = page.locator('.mode-chip select')

@@ -137,6 +137,8 @@ type Server struct {
 	claude  claudeCache  // the Claude model list (claudeinfo.go)
 	codex   codexCache   // the Codex model list (codexinfo.go)
 	signins signIns      // sign-ins run from the page (signin.go)
+	terms   terms        // the page's terminals (terms.go)
+	repos   repoCache    // the repositories found below each folder (git.go)
 
 	autoUpdate bool // newer releases are installed by this server itself (release.go); told to the page
 	devices    func() Devices // the Other devices panel's addresses (devices.go)
@@ -201,6 +203,7 @@ func (s *Server) Close() {
 		close(s.stop)
 		s.runner.stop()
 		s.signins.stopAll()
+		s.terms.closeAll()
 		s.done.Wait()
 	})
 }
@@ -256,6 +259,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/commands", s.commands)
 	mux.HandleFunc("POST /api/restart", s.restartWhenIdle)
 	mux.HandleFunc("GET /api/events", s.events)
+	mux.HandleFunc("GET /api/git", s.gitStatus)
+	mux.HandleFunc("GET /api/git/diff", s.gitDiff)
+	mux.HandleFunc("GET /api/terms", s.termList)
+	mux.HandleFunc("POST /api/terms", s.termOpen)
+	mux.HandleFunc("GET /api/terms/{id}/out", s.termOut)
+	mux.HandleFunc("POST /api/terms/{id}/in", s.termIn)
+	mux.HandleFunc("POST /api/terms/{id}/resize", s.termResize)
+	mux.HandleFunc("POST /api/terms/{id}/close", s.termClose)
 	mux.HandleFunc("GET /api/assets/{name}", s.asset)
 	ui, _ := fs.Sub(uiFiles, "ui")
 	mux.Handle("GET /", cachedUI(ui))

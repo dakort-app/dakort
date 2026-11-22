@@ -51,6 +51,15 @@ else to install. The CLIs run only while a turn runs.
   workbooks as sheets, with their colours and formats. CSV as tables.
   Images, SVG, video, audio. Archives as a tree. A file the agent changes
   re-renders at once.
+- **What changed, as git sees it.** In a git repository the explorer
+  colours changed files as VS Code does, and Changes lists them with the
+  branch; a tap shows a file's diff since the last commit.
+- **Terminals.** A panel under the editor, as in VS Code, with as many
+  shells as you like in the project's folder (PowerShell on Windows, your
+  login shell elsewhere). They keep running while the panel is hidden or
+  the page reloads, and end when the server restarts. On a phone the
+  terminal takes the screen, with a row of the keys a phone lacks (Esc,
+  Ctrl, Tab, arrows).
 - **An eye on cost.** Each session shows how full its context is and how
   long its prompt cache stays warm, which is what decides what the next
   message costs. A big session left idle is compacted before the cache

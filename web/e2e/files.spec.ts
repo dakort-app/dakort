@@ -10,7 +10,19 @@ test.afterEach(closeOpened)
 test('the explorer sorts by date or by name', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'the explorer is a drawer on a phone')
   await page.addInitScript(() => localStorage.removeItem('dakort.filesSort'))
-  await openSession(page, (l) => l[0])
+  // A session whose folder has files: the newest on 2026-11-21 was in an
+  // empty folder, and the check waited for a row that never came.
+  const list: Session[] = await (await page.request.get('/api/sessions', { headers: { Cookie: 'dakort_token=' + token } })).json()
+  let pick: Session | undefined
+  for (const s of list.slice(0, 20)) {
+    const r = await page.request.get(`/api/files/list?root=${encodeURIComponent(s.folder ?? '')}&path=`, { headers: { Cookie: 'dakort_token=' + token } })
+    if (r.ok() && ((await r.json()) as unknown[]).length) {
+      pick = s
+      break
+    }
+  }
+  test.skip(!pick, 'no recent session in a folder with files')
+  await openSession(page, (l) => l.find((s) => s.id === pick!.id) ?? l[0])
   const panel = page.locator('.explorer-panel')
   await panel.locator('.tree-row').first().waitFor()
   await expect(panel.locator('.files-sort .chip-btn.on')).toHaveText('Recent')
@@ -797,7 +809,9 @@ test('tabs and files carry icons', async ({ page }, info) => {
   await page.screenshot({ path: `test-results/tab-icons-${info.project.name}.png` })
   if (info.project.name === 'desktop') {
     const rows = page.locator('.explorer-panel .tree-row:not(:has(.folder-icon))')
-    await page.locator('.explorer-panel .tree-row').first().waitFor()
+    // The listing, or the word that the folder is empty (the newest
+    // session's folder was, on 2026-11-21, and this waited for good).
+    await page.locator('.explorer-panel .tree-row, .explorer-panel .explorer > .faint').first().waitFor()
     if (await rows.count()) await expect(rows.first().locator('.file-icon')).toHaveCount(1)
   }
 })

@@ -147,6 +147,18 @@ const copyButton =
   svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>') +
   '</button>'
 
+// join resolves a relative link against the folder of the file it is in.
+// It lives here, not with the file view, so its unit test loads no part of
+// the page (the view's imports reach the store, which needs a document).
+export function join(fromFile: string, href: string): string {
+  const parts = fromFile.split('/').slice(0, -1)
+  for (const seg of href.split(/[?#]/)[0].split('/')) {
+    if (seg === '..') parts.pop()
+    else if (seg && seg !== '.') parts.push(decodeURIComponent(seg))
+  }
+  return parts.join('/')
+}
+
 export function isRelative(href: string): boolean {
   return !!href && !/^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith('/') && !href.startsWith('#')
 }

@@ -1,7 +1,9 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { AuthError, getJSON, HTTPError, postJSON } from './api'
 import { Markdown } from './Markdown'
-import { isRelative } from './mdrender'
+import { DiffView } from './DiffView'
+import { diffTaken, markOf, useDiffAsk, useGit } from './git'
+import { isRelative, join } from './mdrender'
 
 // CodeMirror and pdf.js load with the first file that needs them, not
 // with the app.
@@ -177,16 +179,6 @@ function decode(buf: Uint8Array): { text: string; utf8: boolean } {
 // saved), which stay on screen whatever the file does meanwhile.
 type Edit = { text: string; base: string }
 
-// join resolves a relative link against the folder of the file it is in.
-export function join(fromFile: string, href: string): string {
-  const parts = fromFile.split('/').slice(0, -1)
-  for (const seg of href.split(/[?#]/)[0].split('/')) {
-    if (seg === '..') parts.pop()
-    else if (seg && seg !== '.') parts.push(decodeURIComponent(seg))
-  }
-  return parts.join('/')
-}
-
 // agentBusy: an agent is working in this folder, so it may write this file.
 type FileProps = { root: string; path: string; onOpen: Opener; jump?: Jump; active?: boolean; agentBusy?: boolean }
 
@@ -207,6 +199,20 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
   const [err, setErr] = useState('')
   const [source, setSource] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
+
+  // The diff since the last commit, for a file git shows as changed:
+  // Changes in the sidebar opens it, the Diff button turns it on and off.
+  const git = useGit(root)
+  const mark = ext === 'pdf' || ext === 'docx' ? '' : markOf(git, path, false)
+  const [diffOn, setDiff] = useState(false)
+  const asked = useDiffAsk()
+  useEffect(() => {
+    if (asked.key === root + '\n' + path && asked.n > diffTaken.n) {
+      diffTaken.n = asked.n
+      setDiff(true)
+    }
+  }, [asked])
+  const diff = diffOn && !!mark
 
   // Preview and Source of a Markdown file meet at the same place. Each
   // block of the preview knows its source line (mdrender), the editor
@@ -377,8 +383,13 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
           Edit
         </button>
       )}
+      {!dirty && !phoneEdit && mark && (
+        <button className={'btn small-btn' + (diff ? ' on' : '')} onClick={() => setDiff(!diff)} aria-pressed={diff} title={diff ? 'Show the file' : 'Show what changed since the last commit'}>
+          Diff
+        </button>
+      )}
       {/* Unsaved typing lives in the source view, so it stays on screen. */}
-      {!dirty && !phoneEdit && (ext === 'md' || ext === 'svg' || tables.has(ext)) && (
+      {!diff && !dirty && !phoneEdit && (ext === 'md' || ext === 'svg' || tables.has(ext)) && (
         <button className="btn small-btn" onClick={toggleSource}>
           {source ? (ext === 'md' ? 'Preview' : ext === 'svg' ? 'Picture' : 'Table') : 'Source'}
         </button>
@@ -408,7 +419,8 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
   // A new version of the file gets a new address, so the browser loads it.
   const versioned = fileURL('raw', root, path) + (stat ? '&v=' + encodeURIComponent(stat.mtime) : '')
   let body
-  if (err && !loaded) body = <div className="center error">{err}</div>
+  if (diff) body = <DiffView root={root} path={path} version={(stat ? stat.size + ':' + stat.mtime : '') + mark} />
+  else if (err && !loaded) body = <div className="center error">{err}</div>
   else if (ext === 'pdf') {
     body = (
       <Suspense fallback={<div className="center faint">Loading…</div>}>
@@ -511,7 +523,7 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
     <div className="file-view">
       {/* A PDF or Word file shows its path in its own bar, saving a line. */}
       {ext !== 'pdf' && ext !== 'docx' && head}
-      {err && loaded && <div className="notice error small">{err}</div>}
+      {err && loaded && !diff && <div className="notice error small">{err}</div>}
       {editNotes}
       {body}
     </div>

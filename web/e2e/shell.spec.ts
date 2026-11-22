@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { closeOpened, openSession, seedTabs, tabsKey, quiet, token, type Session } from './helpers'
 
 test.skip(!token, 'DAKORT_TOKEN not set')
@@ -586,3 +586,100 @@ test('the app is installable, and an old service worker is removed', async ({ br
     await ctx.close()
   }
 })
+
+// The terminal: the button opens a panel with a shell in the project's
+// folder, what is typed runs, + adds a second, a reload draws the first
+// one's output again (the shells live in the server), and closing the
+// last hides the panel. A phone has no button. Only echo is typed: the
+// shell runs in a real project folder.
+test('a terminal runs in the project, survives a reload, and closes', async ({ page }, info) => {
+  // Hidden to start with, once: a reload keeps what the page chose.
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('madetest-term')) return
+    sessionStorage.setItem('madetest-term', '1')
+    localStorage.removeItem('dakort.termShown')
+  })
+  const s = await openSession(page, quiet)
+  const button = page.getByRole('button', { name: 'Terminal', exact: true })
+  if (info.project.name !== 'desktop') return phoneTerminal(page, s.folder!)
+  await button.click()
+  const panel = page.getByRole('region', { name: 'Terminal' })
+  const tabs = panel.locator('.term-tab')
+  await expect(tabs).toHaveCount(1)
+  const screen = panel.locator('.term-view:visible .xterm-rows')
+  await expect(screen).toBeVisible()
+  // The typed line shows the words once, its output a second time.
+  const seen = async (s: string) => ((await screen.innerText()).match(new RegExp(s, 'g')) ?? []).length
+  await expect.poll(async () => (await screen.innerText()).trim().length, { timeout: 20_000 }).toBeGreaterThan(0) // the prompt
+  await panel.locator('.term-view:visible').click()
+  await page.keyboard.type('echo madetest-one')
+  await page.keyboard.press('Enter')
+  await expect.poll(() => seen('madetest-one'), { timeout: 20_000 }).toBeGreaterThanOrEqual(2)
+  await page.screenshot({ path: 'test-results/terminal.png' })
+  // Ctrl+` hides it and shows it again, also with the focus in the shell.
+  await page.keyboard.press('Control+Backquote')
+  await expect(panel).toHaveCount(0)
+  await expect(button).toHaveAttribute('aria-pressed', 'false')
+  await page.keyboard.press('Control+Backquote')
+  await expect(tabs).toHaveCount(1)
+  await expect(button).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(() => seen('madetest-one'), { timeout: 20_000 }).toBeGreaterThanOrEqual(2)
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.evaluate(() => (document.documentElement.dataset.theme = 'dark'))
+  await page.screenshot({ path: 'test-results/terminal-dark.png' })
+  await page.evaluate(() => (document.documentElement.dataset.theme = 'light'))
+
+  await panel.getByRole('button', { name: 'New terminal' }).click()
+  await expect(tabs).toHaveCount(2)
+  await expect(tabs.nth(1)).toHaveClass(/active/)
+
+  await page.reload()
+  await expect(tabs).toHaveCount(2)
+  await tabs.first().click()
+  await expect.poll(() => seen('madetest-one'), { timeout: 20_000 }).toBeGreaterThanOrEqual(2)
+
+  for (let i = 0; i < 2; i++) await tabs.first().getByRole('button', { name: /^Close / }).click()
+  await expect(panel).toHaveCount(0)
+  expect(await (await page.request.get('/api/terms?folder=' + encodeURIComponent(s.folder!))).json()).toEqual([])
+})
+
+// On a phone the terminal takes the screen, with a row of keys: ↑ brings
+// back the last line, Ctrl then c drops a typed line (nothing runs), and
+// Ctrl lets go after one key. Back leaves the shell running; opened again,
+// its output is there.
+async function phoneTerminal(page: Page, folder: string) {
+  await page.getByRole('button', { name: 'Terminal', exact: true }).click()
+  const panel = page.getByRole('region', { name: 'Terminal' })
+  await expect(panel).toBeVisible()
+  const box = (await panel.boundingBox())!
+  expect(box.width).toBe(page.viewportSize()!.width) // the whole screen
+  const screen = panel.locator('.term-view:visible .xterm-rows')
+  const seen = async (s: string) => ((await screen.innerText()).match(new RegExp(s, 'g')) ?? []).length
+  await expect.poll(async () => (await screen.innerText()).trim().length, { timeout: 20_000 }).toBeGreaterThan(0)
+  await panel.locator('.term-view:visible').click()
+  await page.keyboard.type('echo madetest-two')
+  await page.keyboard.press('Enter')
+  await expect.poll(() => seen('madetest-two'), { timeout: 20_000 }).toBeGreaterThanOrEqual(2)
+  const keys = panel.getByRole('toolbar', { name: 'Keys' })
+  await keys.getByRole('button', { name: 'Up' }).click()
+  await page.keyboard.press('Enter')
+  await expect.poll(() => seen('madetest-two'), { timeout: 20_000 }).toBeGreaterThanOrEqual(4)
+  await page.screenshot({ path: 'test-results/terminal-phone.png' })
+
+  await page.keyboard.type('echo madetest-dropped')
+  const ctrl = keys.getByRole('button', { name: 'Ctrl' })
+  await ctrl.click()
+  await expect(ctrl).toHaveAttribute('aria-pressed', 'true')
+  await page.keyboard.type('c')
+  await expect(ctrl).toHaveAttribute('aria-pressed', 'false')
+  await page.keyboard.type('echo madetest-after')
+  await page.keyboard.press('Enter')
+  await expect.poll(() => seen('madetest-after'), { timeout: 20_000 }).toBeGreaterThanOrEqual(2)
+  expect(await seen('madetest-dropped')).toBe(1) // typed, never run
+
+  await panel.getByRole('button', { name: 'Hide the terminal' }).click()
+  await expect(panel).toHaveCount(0)
+  await page.getByRole('button', { name: 'Terminal', exact: true }).click()
+  await expect.poll(() => seen('madetest-after'), { timeout: 20_000 }).toBeGreaterThanOrEqual(2)
+  for (const t of await (await page.request.get('/api/terms?folder=' + encodeURIComponent(folder))).json()) await page.request.post(`/api/terms/${t.id}/close`, { data: {} })
+}

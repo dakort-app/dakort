@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent, type ReactNode } from 'react'
 import { useLastProvider } from './Composer'
 import { Explorer } from './Explorer'
+import { Changes } from './Changes'
+import { useGit } from './git'
 import { FileView, fileKey, unsaved, type Jump, type Opener } from './FileView'
 import { ActivityDot, FolderList, useOtherActivity } from './FolderBar'
 import { StreamDot } from './Home'
-import { AgentIcon, FileIcon, HistoryIcon, NewChatIcon, SidebarIcon, SplitIcon, UnsplitIcon } from './icons'
+import { AgentIcon, BranchIcon, FileIcon, HistoryIcon, NewChatIcon, SidebarIcon, SplitIcon, TerminalIcon, UnsplitIcon } from './icons'
 import { FILE, providerOf, sameFolder, filesByName, setFilesByName, isUnread, loadTabs, markFresh, markSeen, NEW, saveTabs, setExplorerWidth, setLastFolder, tabsFor, type Tabs, explorerWidth, explorerShown, setExplorerShown, reconcile, flat, folderKey, resumeCommand } from './local'
 import { copyText } from './clip'
 import { loadSharedTabs, shareTabs } from './store'
@@ -15,6 +17,8 @@ import { postJSON } from './api'
 import { SessionView } from './SessionView'
 import { refreshLists, setPlace, useStore } from './store'
 import type { Session } from './types'
+
+const TerminalPanel = lazy(() => import('./Terminal').then((m) => ({ default: m.TerminalPanel })))
 
 const wide = () => typeof matchMedia !== 'undefined' && matchMedia('(min-width: 900px)').matches
 // The same, re-rendering when the window crosses the line: a split view
@@ -52,6 +56,10 @@ export function Workspace({ folder }: { folder: string }) {
     setByName(name)
     setFilesByName(name)
   }
+  // The sidebar shows the files or, in a git repository, the changes.
+  const git = useGit(folder)
+  const [changesState, setChanges] = useState(false)
+  const changes = changesState && !!git?.repo
   const setFiles = (on: boolean) => {
     setFilesState(on)
     if (wide()) setExplorerShown(on)
@@ -93,6 +101,51 @@ export function Workspace({ folder }: { folder: string }) {
   const view = (p: PaneNo): Pane => (splitOn ? pane(tabs, p) : merged(tabs))
   const setFocus = (p: PaneNo) => {
     if (splitOn && focus !== p) update(withPane(tabs, p, pane(tabs, p), p))
+  }
+
+  // The terminal panel under the editor. Shown or hidden and its height
+  // stick on this device; its shells live in the server (Terminal.tsx).
+  // A phone shows it over the whole screen instead, opened each time.
+  const [phoneTerm, setPhoneTerm] = useState(false)
+  const [termShown, setTermShownState] = useState(() => localStorage.getItem('dakort.termShown') === '1')
+  const setTermShown = (on: boolean) => {
+    setTermShownState(on)
+    localStorage.setItem('dakort.termShown', on ? '1' : '0')
+  }
+  // Ctrl+` shows or hides it, as in VS Code; caught before the terminal,
+  // which would pass it to the shell.
+  const termShownRef = useRef(termShown)
+  termShownRef.current = termShown
+  useEffect(() => {
+    if (!isWide) return
+    const key = (e: KeyboardEvent) => {
+      if (e.ctrlKey && !e.altKey && !e.metaKey && e.code === 'Backquote') {
+        e.preventDefault()
+        e.stopPropagation()
+        setTermShown(!termShownRef.current)
+      }
+    }
+    window.addEventListener('keydown', key, true)
+    return () => window.removeEventListener('keydown', key, true)
+  }, [isWide])
+  const [termH, setTermH] = useState(() => Number(localStorage.getItem('dakort.termHeight')) || 260)
+  const startTermDrag = (e: PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const el = e.currentTarget
+    const panel = el.nextElementSibling as HTMLElement
+    const y0 = e.clientY
+    const fit = (h: number) => Math.max(100, Math.min(h, window.innerHeight * 0.75))
+    let h = termH
+    el.setPointerCapture(e.pointerId)
+    el.onpointermove = (m) => {
+      h = fit(termH + y0 - m.clientY)
+      panel.style.height = h + 'px'
+    }
+    el.onpointerup = el.onpointercancel = () => {
+      el.onpointermove = el.onpointerup = el.onpointercancel = null
+      setTermH(h)
+      localStorage.setItem('dakort.termHeight', String(h))
+    }
   }
 
   useEffect(() => setLastFolder(folder), [folder])
@@ -471,6 +524,22 @@ export function Workspace({ folder }: { folder: string }) {
               <SplitIcon />
             </button>
           )}
+          {isWide && p === panes.at(-1) && (
+            <button
+              className={'icon' + (termShown ? ' on' : '')}
+              onClick={() => setTermShown(!termShown)}
+              aria-label="Terminal"
+              aria-pressed={termShown}
+              title={(termShown ? 'Hide the terminal' : 'Show the terminal: shells in this project’s folder') + ' (Ctrl+`)'}
+            >
+              <TerminalIcon />
+            </button>
+          )}
+          {!isWide && (
+            <button className="icon" onClick={() => setPhoneTerm(true)} aria-label="Terminal" title="Terminal: shells in this project’s folder">
+              <TerminalIcon />
+            </button>
+          )}
           <button className="icon" onClick={() => setHistory(history === p ? null : p)} aria-label="Session history" title="Session history">
             <HistoryIcon />
           </button>
@@ -525,18 +594,45 @@ export function Workspace({ folder }: { folder: string }) {
               }
             />
             <div className="panel-head">
-              <span className="small faint explorer-title">FILES</span>
+              {git?.repo ? (
+                <span className="side-switch" role="tablist">
+                  <button role="tab" aria-selected={!changes} className={'side-tab' + (changes ? '' : ' on')} onClick={() => setChanges(false)}>
+                    FILES
+                  </button>
+                  <button role="tab" aria-selected={changes} className={'side-tab' + (changes ? ' on' : '')} onClick={() => setChanges(true)} title="Files changed since the last commit">
+                    CHANGES{git.files.length > 0 && <span className="side-count">{git.files.length}</span>}
+                  </button>
+                </span>
+              ) : (
+                <span className="small faint explorer-title">FILES</span>
+              )}
               <span className="grow" />
-              <span className="files-sort">
-                <button className={'chip-btn' + (byName ? '' : ' on')} onClick={() => sortFiles(false)} title="Newest first">
-                  Recent
-                </button>
-                <button className={'chip-btn' + (byName ? ' on' : '')} onClick={() => sortFiles(true)} title="By name">
-                  A–Z
-                </button>
-              </span>
+              {changes ? (
+                // With changes in several repositories each heading names its branch.
+                git?.branch && new Set(git.files.map((f) => f.repo)).size < 2 && (
+                  <span className="branch small faint" title={`On branch ${git.branch}` + (git.ahead ? `, ${git.ahead} commit(s) not pushed` : '') + (git.behind ? `, ${git.behind} to pull` : '')}>
+                    <BranchIcon />
+                    <span className="ellipsis">{git.branch}</span>
+                    {!!git.ahead && <span>↑{git.ahead}</span>}
+                    {!!git.behind && <span>↓{git.behind}</span>}
+                  </span>
+                )
+              ) : (
+                <span className="files-sort">
+                  <button className={'chip-btn' + (byName ? '' : ' on')} onClick={() => sortFiles(false)} title="Newest first">
+                    Recent
+                  </button>
+                  <button className={'chip-btn' + (byName ? ' on' : '')} onClick={() => sortFiles(true)} title="By name">
+                    A–Z
+                  </button>
+                </span>
+              )}
             </div>
-            <Explorer key={folder} root={folder} onOpen={(path) => openFile(path)} active={activeFile} byName={byName} />
+            {changes ? (
+              <Changes root={folder} onOpen={(path) => openFile(path)} active={activeFile} />
+            ) : (
+              <Explorer key={folder} root={folder} onOpen={(path) => openFile(path)} active={activeFile} byName={byName} />
+            )}
           </aside>
         )}
         {/* On a phone a tap anywhere beside the drawer closes it (hidden on a laptop). */}
@@ -567,6 +663,21 @@ export function Workspace({ folder }: { folder: string }) {
           renderPane(p),
         ])}
       </div>
+      {isWide && termShown && (
+        <>
+          <div className="term-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize the terminal" title="Drag to resize" onPointerDown={startTermDrag} />
+          <div className="term-wrap" style={{ height: termH }}>
+            <Suspense fallback={<div className="faint small pad">Loading the terminal…</div>}>
+              <TerminalPanel key={folder} folder={folder} onHide={() => setTermShown(false)} />
+            </Suspense>
+          </div>
+        </>
+      )}
+      {!isWide && phoneTerm && (
+        <Suspense fallback={<div className="term-panel phone faint small pad">Loading the terminal…</div>}>
+          <TerminalPanel key={folder} folder={folder} phone onHide={() => setPhoneTerm(false)} />
+        </Suspense>
+      )}
       {overview && (
         <div className="sheet-back" onClick={() => setOverview(false)}>
           <div className="sheet tab-overview" onClick={(e) => e.stopPropagation()}>

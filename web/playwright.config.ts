@@ -7,10 +7,12 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: 'e2e',
   timeout: 90_000,
-  // The whole run takes about 2 minutes. A run that hangs past this is
-  // aborted, browsers and all: one hung on 2026-11-02 and its browser sat
-  // in the project folder for a day, blocking a rename.
-  globalTimeout: 6 * 60_000,
+  // The whole run takes about 4.5 minutes (2026-11-21, 110 checks). A run
+  // that hangs past this is aborted, browsers and all: one hung on
+  // 2026-11-02 and its browser sat in the project folder for a day,
+  // blocking a rename. At 6 minutes one failing check (90 s, twice with
+  // the retry) left a third of the run unrun.
+  globalTimeout: 9 * 60_000,
   workers: 1,
   // One retry: on 2026-11-17 a different check failed in about one full
   // run in three (a PDF, a CSV, a Word file, the old-device login), in the

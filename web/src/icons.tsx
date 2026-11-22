@@ -57,6 +57,29 @@ export const SplitIcon = () => (
   </svg>
 )
 
+export const TerminalIcon = () => (
+  <svg {...base} aria-hidden="true">
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M7 9l3 3-3 3M12 15h5" />
+  </svg>
+)
+
+// A git branch: two commits on a line and one off to the side.
+export const BranchIcon = () => (
+  <svg {...base} aria-hidden="true">
+    <circle cx="6" cy="5" r="2" />
+    <circle cx="6" cy="19" r="2" />
+    <circle cx="18" cy="7" r="2" />
+    <path d="M6 7v10M18 9c0 5-12 3-12 8" />
+  </svg>
+)
+
+export const ChevronDownIcon = () => (
+  <svg {...base} aria-hidden="true">
+    <path d="M6 9l6 6 6-6" />
+  </svg>
+)
+
 export const UnsplitIcon = () => (
   <svg {...base} aria-hidden="true">
     <rect x="3" y="4" width="18" height="16" rx="2" />

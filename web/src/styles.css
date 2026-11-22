@@ -456,6 +456,132 @@ a.btn {
 .pane-splitter:active {
   background: var(--line);
 }
+/* The terminal panel under the editor (Terminal.tsx), a box like the
+   others, its height dragged by the bar above it. */
+.term-splitter {
+  height: 6px;
+  margin: -4.5px 0 -1.5px;
+  flex-shrink: 0;
+  cursor: row-resize;
+  touch-action: none;
+  z-index: 2;
+  border-radius: 3px;
+}
+.term-splitter:hover,
+.term-splitter:active {
+  background: var(--line);
+}
+.term-wrap {
+  flex-shrink: 0;
+  display: flex;
+  padding: 0 3px 3px;
+  background: var(--frame);
+}
+.term-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.term-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--line);
+  background: var(--side);
+}
+.term-tab svg {
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;
+}
+.term-tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  flex: 1;
+  min-width: 0;
+}
+.term-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.term-tab.active {
+  background: var(--chip-on);
+}
+.term-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  padding: 4px 0 0 8px;
+}
+.term-view {
+  height: 100%;
+}
+.icon.on {
+  color: var(--accent);
+}
+/* On a phone: the whole screen, down to the keyboard (top and height set
+   from the visual viewport), with the key row at the bottom. */
+.term-panel.phone {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 100dvh;
+  z-index: 20;
+  border: 0;
+  border-radius: 0;
+  padding-top: env(safe-area-inset-top);
+}
+.term-panel.phone .term-head {
+  padding: 4px 6px;
+}
+.term-panel.phone .term-head > .icon:first-child {
+  font-size: 26px;
+  line-height: 1;
+  padding: 0 10px 2px;
+}
+.term-panel.phone .term-body {
+  padding: 4px 0 0 4px;
+}
+.term-keys {
+  display: flex;
+  gap: 4px;
+  padding: 5px 6px;
+  overflow-x: auto;
+  border-top: 1px solid var(--line);
+  background: var(--side);
+  flex-shrink: 0;
+}
+.term-key {
+  flex: 0 0 auto;
+  min-width: 40px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px var(--mono);
+}
+.term-key.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 /* Split view: the two panes share the width by --split (the first pane's
    share), set on .ws-body and while dragging. */
 .ws-body.split .editor-panel[data-pane='0'] {
@@ -2548,4 +2674,142 @@ html.tab-dragging * {
   padding-left: 10px;
   border-left: 3px solid var(--line);
   color: var(--faint);
+}
+
+/* Git: changed files in VS Code's colours, the Files and Changes switch,
+   the branch, and a file's diff. */
+:root {
+  --git-m: #9a6700;
+  --git-u: #1a7f37;
+  --git-d: #c72e2e;
+  --git-c: #8250df;
+}
+:root[data-theme='dark'] {
+  --git-m: #e2c08d;
+  --git-u: #73c991;
+  --git-d: #f2665e;
+  --git-c: #c297ff;
+}
+.git-M,
+.git-R {
+  color: var(--git-m);
+}
+.git-U,
+.git-A {
+  color: var(--git-u);
+}
+.git-D {
+  color: var(--git-d);
+}
+.git-D.ellipsis,
+.git-D.change-name {
+  text-decoration: line-through;
+}
+.git-C {
+  color: var(--git-c);
+}
+.git-mark {
+  margin-left: auto;
+  padding-left: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.change-repo {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  padding: 8px 8px 2px 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.change-repo .faint {
+  font-weight: 400;
+  white-space: pre;
+}
+.side-switch {
+  display: flex;
+  gap: 2px;
+  margin-left: -6px;
+}
+.side-tab {
+  border: 0;
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.side-tab.on {
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  border-radius: 0;
+}
+.side-count {
+  margin-left: 5px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--chip-on);
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex-shrink: 1;
+  padding-right: 6px;
+  white-space: nowrap;
+}
+.branch svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.diff-view {
+  flex: 1;
+  overflow: auto;
+  font: 13px/1.5 var(--mono);
+  padding-bottom: 24px;
+}
+.diff-line {
+  display: flex;
+  min-width: max-content;
+}
+.diff-no {
+  width: 4.5ch;
+  flex-shrink: 0;
+  text-align: right;
+  padding-right: 6px;
+  color: var(--faint);
+  user-select: none;
+}
+.diff-sign {
+  width: 2ch;
+  flex-shrink: 0;
+  text-align: center;
+  user-select: none;
+}
+.diff-text {
+  white-space: pre;
+  padding-right: 16px;
+}
+.diff-add {
+  background: var(--tint-ok);
+}
+.diff-del {
+  background: var(--tint-err);
+}
+.diff-gap {
+  padding: 4px 10px;
+  margin: 6px 0;
+  background: var(--side);
+  color: var(--faint);
+  font-size: 12px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
 }

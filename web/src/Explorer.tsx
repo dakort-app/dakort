@@ -3,6 +3,7 @@ import { getJSON, HTTPError, postJSON } from './api'
 import { fileURL } from './FileView'
 import { FileIcon, FolderIcon } from './icons'
 import { filesChanged, useStore } from './store'
+import { markOf, markTitle, useGit } from './git'
 
 // The folder's files, one level fetched per expand, like VS Code's
 // explorer. Expanded folders are listed again after every turn, since
@@ -106,6 +107,19 @@ export function Explorer({ root, onOpen, active, byName }: Props) {
     }
   }
 
+  // Changed files in git's colours, as VS Code shows them; a folder with
+  // a change inside gets a dot.
+  const git = useGit(root)
+  const marks: Record<string, string> = {}
+  const branchOf: Record<string, string> = Object.fromEntries((git?.repos ?? []).filter((r) => r.path && r.branch).map((r) => [r.path, r.branch!]))
+  if (git?.repo && git.files.length)
+    for (const [dir, l] of Object.entries(lists))
+      for (const e of l) {
+        const p = dir ? dir + '/' + e.name : e.name
+        const m = markOf(git, p, !!e.dir)
+        if (m) marks[p] = m
+      }
+
   const rows = (dir: string, depth: number): ReactNode[] =>
     (byName ? (lists[dir] ?? []) : newestFirst(lists[dir] ?? [])).flatMap((e) => {
       const p = dir ? dir + '/' + e.name : e.name
@@ -130,11 +144,16 @@ export function Explorer({ root, onOpen, active, byName }: Props) {
           }}
           onTouchEnd={() => clearTimeout(press.current)}
           onTouchMove={() => clearTimeout(press.current)}
-          title={p}
+          title={p + (e.dir && branchOf[p] ? ` (a git repository, on ${branchOf[p]})` : '')}
         >
           <span className="tree-caret">{e.dir ? (open.has(p) ? '▾' : '▸') : ''}</span>
           {e.dir ? <FolderIcon size={15} /> : <FileIcon path={e.name} size={15} />}
-          <span className="ellipsis">{e.name}</span>
+          <span className={'ellipsis' + (marks[p] ? ' git-' + marks[p] : '')}>{e.name}</span>
+          {marks[p] && (
+            <span className={'git-mark git-' + marks[p]} title={e.dir ? 'Changes inside' : markTitle[marks[p]]}>
+              {e.dir ? '•' : marks[p]}
+            </span>
+          )}
         </div>
       )
       return e.dir && open.has(p) ? [row, ...rows(p, depth + 1)] : [row]

@@ -20,7 +20,7 @@ export function setDark(dark: boolean) {
 function apply(dark: boolean) {
   document.documentElement.dataset.theme = dark ? 'dark' : 'light'
   const meta = document.querySelector<HTMLMetaElement>('meta[name=theme-color]')
-  if (meta) meta.content = dark ? '#1f1e1c' : '#fdfcfa'
+  if (meta) meta.content = dark ? '#1c1b19' : '#fdfcfa'
 }
 
 export function onTheme(f: () => void): () => void {

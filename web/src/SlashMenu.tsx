@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getJSON } from './api'
+import { cn } from '@/lib/utils'
+import { menuCaption, menuItem, menuSurface } from '@/lib/menu'
 
 // The "/" menu: typing a slash at the start of the box lists the commands
 // that work here (GET /api/commands: the headless built-ins, then skills
@@ -44,6 +46,8 @@ export function useSlashMenu(folder: string, text: string, enabled = true) {
     loading: all === null,
     shown,
     sel: Math.min(sel, Math.max(shown.length - 1, 0)),
+    // has: the folder lists a command of this name (a skill, say).
+    has: (name: string) => !!all?.some((c) => c.name === name),
     // onKey handles the menu's keys; true when it used the key.
     onKey(e: { key: string; preventDefault(): void }, pick: (c: Command) => void): boolean {
       if (!open) return false
@@ -68,26 +72,44 @@ export function useSlashMenu(folder: string, text: string, enabled = true) {
   }
 }
 
+// A row is the command in mono (and its argument hint), and what it does on
+// one line: beside it on a laptop, under it on a phone.
 export function SlashMenu({ menu, pick }: { menu: ReturnType<typeof useSlashMenu>; pick: (c: Command) => void }) {
   if (!menu.open) return null
   return (
-    <div className="slash-menu" role="listbox">
-      {menu.loading && <div className="slash-row faint">Loading commands…</div>}
+    <div className={cn('slash-menu', menuSurface, 'animate-none')} role="listbox" aria-label="Commands">
+      <div className={cn('menu-head', menuCaption, 'sticky -top-1 z-10 -mx-1 -mt-1 flex justify-between gap-3 bg-popover px-3 pt-2')} aria-hidden="true">
+        Commands<span className="menu-keys">↑↓ to move · Enter to pick · Esc to close</span>
+      </div>
+      {menu.loading && <div className={cn('slash-row slash-loading', menuCaption)}>Loading commands…</div>}
       {menu.shown.map((c, i) => (
         <div
           key={c.name}
           role="option"
           aria-selected={i === menu.sel}
-          className={'slash-row' + (i === menu.sel ? ' on' : '')}
+          className={cn('slash-row', menuItem, 'items-baseline gap-3 hover:bg-transparent aria-selected:bg-accent aria-selected:text-accent-foreground', i === menu.sel && 'on')}
+          title={'/' + c.name + (c.argumentHint ? ' ' + c.argumentHint : '')}
           onMouseEnter={() => menu.setSel(i)}
           onMouseDown={(e) => {
             e.preventDefault() // keep the focus in the box
             pick(c)
           }}
         >
-          <span className="slash-name">/{c.name}</span>
-          {c.argumentHint && <span className="faint small"> {c.argumentHint}</span>}
-          {c.description && <div className="slash-desc faint small ellipsis">{c.description}</div>}
+          <span className="slash-cmd">
+            <span className="slash-name">/{c.name}</span>
+            {c.argumentHint && (
+              <span className="slash-hint">
+                {/* Each word of the hint whole: it wraps between them, never inside a flag. */}
+                {c.argumentHint.split(' ').map((w, k) => (
+                  <span key={k}>
+                    {' '}
+                    <span className="nb">{w}</span>
+                  </span>
+                ))}
+              </span>
+            )}
+          </span>{' '}
+          {c.description && <span className="slash-desc text-muted-foreground">{c.description}</span>}
         </div>
       ))}
     </div>

@@ -1,16 +1,26 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
+import { activate } from './a11y'
 import { api, HTTPError, postJSON } from './api'
 import { releasesURL, useConfig } from './config'
 import { StreamDot } from './Home'
-import { Devices } from './Devices'
-import { DevicesIcon, MoonIcon, MoreIcon, PlusIcon, SunIcon } from './icons'
+import { Mark } from './mark'
+import { CloseIcon, CopyIcon, DevicesIcon, Icon, MoonIcon, PencilIcon, PlusIcon, ProjectIcon, SettingsIcon, TerminalIcon } from './icons'
+import { copyText } from './clip'
+import { keepInView } from './PopMenu'
 import { busy, tasksTitle, working } from './live'
 import { followMoves, isUnread, sameFolder } from './local'
 import { OpenFolder } from './OpenFolder'
 import { baseName, folderHash } from './route'
 import { refreshLists, useStore } from './store'
 import { isDark, setDark } from './theme'
+import { ErrorMark } from './ToolView'
 import type { Folder, LeftoverRef } from './types'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+import { menuItem, menuLabel, menuSeparator, menuShortcut, menuSurface } from '@/lib/menu'
+import { SwitchLook } from '@/lib/switch'
+import { toastClass } from '@/lib/toast'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
 // The open folders: switching, opening and closing them all happen here,
 // there is no folder page and no top bar. They are a list at the top of
@@ -36,15 +46,22 @@ function useFolders(current: string) {
     .sort((a, b) => baseName(a.path).localeCompare(baseName(b.path), undefined, { sensitivity: 'base' }))
   const state = (f: Folder) => {
     const mine = sessions.filter((s) => sameFolder(s.folder, f.path))
+    if (mine.some((s) => live.turns[s.id]?.permissions.length)) return 'needs'
     if (mine.some((s) => working(live, s.id))) return 'run'
+    if (f.path !== current && mine.some((s) => isUnread(s) && failed(live.ended[s.id]))) return 'fail'
     if (f.path !== current && mine.some(isUnread)) return 'unread'
     if (mine.some((s) => busy(live, s.id))) return 'tasks'
     return ''
   }
-  const dot = (f: Folder) => {
+  // The row's state goes in its trailing slot, the one column every
+  // project row and the file tree's change letters share (VS Code's
+  // decorations); the folder mark stays in the lead, so every row starts
+  // the same. The close × takes the slot under the pointer.
+  const mark = (f: Folder) => {
     const st = state(f)
-    return st ? <span className={'dot ' + st} title={titles[st as Activity]} /> : <span className="dot" />
+    return st ? <span className={'dot ' + st} role="img" aria-label={titles[st as Activity]} /> : null
   }
+  const lead = <span className="lead"><ProjectIcon /></span>
   const go = (f: Folder) => {
     if (f.path !== current) location.hash = folderHash(f.path)
   }
@@ -73,8 +90,30 @@ function useFolders(current: string) {
   const press = useRef(0)
   const startRename = (f: Folder) => {
     setRenameError(null)
+    setRowMenu(null)
     setRenaming(f.path)
   }
+  // A row's menu (right-click, or a long press on a phone): the whole
+  // path on top, then Rename, Copy path and Close. A phone has no hover to
+  // show the path, and a long press used to rename at once.
+  const [rowMenu, setRowMenu] = useState<{ f: Folder; at: DOMRect } | null>(null)
+  const [copied, setCopied] = useState('')
+  useEffect(() => {
+    if (!rowMenu) return
+    const off = (e: Event) => !(e.target as HTMLElement).closest?.('.row-menu') && setRowMenu(null)
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setRowMenu(null)
+    addEventListener('pointerdown', off, true)
+    addEventListener('keydown', esc)
+    return () => {
+      removeEventListener('pointerdown', off, true)
+      removeEventListener('keydown', esc)
+    }
+  }, [rowMenu])
+  useEffect(() => {
+    if (!copied) return
+    const t = window.setTimeout(() => setCopied(''), 2500)
+    return () => clearTimeout(t)
+  }, [copied])
   const rename = async (f: Folder, name: string) => {
     setRenaming('')
     if (!name.trim() || name.trim() === baseName(f.path)) return
@@ -101,7 +140,15 @@ function useFolders(current: string) {
   const row = (f: Folder, after?: () => void) => (
     <Fragment key={f.path}>
     <div
-      className={'folder-row' + (f.path === current ? ' on' : '')}
+      className={cn('folder-row', 'rounded-md text-sm hover:bg-sidebar-accent hover:text-sidebar-accent-foreground', f.path === current && 'on bg-sidebar-accent font-medium text-sidebar-accent-foreground')}
+      role="button"
+      tabIndex={0}
+      aria-current={f.path === current || undefined}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'F2') return startRename(f)
+        activate(() => (after?.(), go(f)))(e)
+      }}
       onClick={() => {
         if (renaming === f.path) return
         after?.()
@@ -110,14 +157,18 @@ function useFolders(current: string) {
       onDoubleClick={() => startRename(f)}
       onContextMenu={(e) => {
         e.preventDefault()
-        startRename(f)
+        clearTimeout(press.current)
+        setRowMenu({ f, at: e.currentTarget.getBoundingClientRect() })
       }}
-      onTouchStart={() => (press.current = window.setTimeout(() => startRename(f), 550))}
+      onTouchStart={(e) => {
+        const el = e.currentTarget
+        press.current = window.setTimeout(() => renaming !== f.path && setRowMenu({ f, at: el.getBoundingClientRect() }), 500)
+      }}
       onTouchEnd={() => clearTimeout(press.current)}
       onTouchMove={() => clearTimeout(press.current)}
-      title={f.path + '\n(double-click to rename the folder)'}
+      aria-keyshortcuts="F2"
     >
-      {dot(f)}
+      {lead}
       {renaming === f.path ? (
         <input
           className="tab-rename grow"
@@ -135,64 +186,106 @@ function useFolders(current: string) {
       ) : (
         <span className="ellipsis grow">{baseName(f.path)}</span>
       )}
-      <span
-        className="folder-x"
-        role="button"
-        aria-label={'Close project ' + baseName(f.path)}
-        title="Close project"
-        onClick={(e) => {
-          e.stopPropagation()
-          after?.()
-          close(f)
-        }}
-      >
-        ×
+      {/* Under the pointer on a laptop; always there, quietly, on a touch
+          screen, which has no hover to bring it out. */}
+      <span className="row-end">
+        {mark(f)}
+        <button
+          className="folder-x"
+          aria-label={'Close project ' + baseName(f.path)}
+          title="Close"
+          onClick={(e) => {
+            e.stopPropagation()
+            after?.()
+            close(f)
+          }}
+        >
+          <CloseIcon sm />
+        </button>
       </span>
     </div>
     {renameError?.path === f.path && (
       <div className="folder-error small" role="alert">
         <div className="row">
-          <span className="grow">{renameError.msg}</span>
-          <span className="folder-x" role="button" aria-label="Dismiss" onClick={() => setRenameError(null)}>
-            ×
+          <ErrorMark />
+          <span className="grow">
+            <span className="folder-error-title">Could not rename the folder.</span> {renameError.msg}
           </span>
+          <button className="folder-x" aria-label="Dismiss" onClick={() => setRenameError(null)}>
+            <CloseIcon sm />
+          </button>
         </div>
         {renameError.leftovers?.map((p) => (
-          <div key={p.session + p.pid} className="row leftover" title={[p.command, p.started && 'since ' + new Date(p.started).toLocaleString()].filter(Boolean).join('\n')}>
+          <div key={p.session + p.pid} className="row leftover">
             <span className="ellipsis grow">
               {p.name}
               {p.title ? <span className="faint"> · {p.title}</span> : null}
             </span>
-            <button className="btn small-btn" onClick={() => stopAndRetry(f, p, renameError.name)} title="End it and rename again">
+            <Button variant="outline" size="xs" onClick={() => stopAndRetry(f, p, renameError.name)}>
               Stop
-            </button>
+            </Button>
           </div>
         ))}
       </div>
     )}
     </Fragment>
   )
-  const sheet = picking && <OpenFolder onClose={() => setPicking(false)} />
+  const menu = rowMenu && (
+    <div
+      className={cn('tab-menu row-menu', menuSurface, 'fixed z-30 flex min-w-48 flex-col slide-in-from-top-2')}
+      role="menu"
+      aria-label={baseName(rowMenu.f.path)}
+      ref={keepInView}
+      style={{ left: Math.max(8, Math.min(rowMenu.at.left, innerWidth - 268)), top: rowMenu.at.bottom + 4, width: Math.min(260, innerWidth - 16) }}
+    >
+      <div className={cn('menu-title', menuLabel)}>{rowMenu.f.path}</div>
+      <button className={menuItem} role="menuitem" onClick={() => startRename(rowMenu.f)}>
+        <PencilIcon />
+        <span className="grow">Rename</span>
+        <kbd className={menuShortcut}>F2</kbd>
+      </button>
+      <button
+        className={menuItem}
+        role="menuitem"
+        onClick={() => {
+          const path = rowMenu.f.path
+          setRowMenu(null)
+          copyText(path).then((ok) => setCopied(ok ? 'Copied the path' : 'Copy failed'))
+        }}
+      >
+        <CopyIcon />
+        Copy path
+      </button>
+      <div role="separator" className={menuSeparator} />
+      <button className={menuItem} role="menuitem" onClick={() => (setRowMenu(null), close(rowMenu.f))}>
+        <CloseIcon />
+        Close project
+      </button>
+    </div>
+  )
+  const sheet = (
+    <>
+      {picking && <OpenFolder onClose={() => setPicking(false)} />}
+      {menu}
+      {copied && (
+        <div className={toastClass} role="status">
+          {copied}
+        </div>
+      )}
+    </>
+  )
   return { open, state, row, sheet, pick: () => setPicking(true) }
 }
 
-// FolderList is the sidebar's "Projects" section: a header (folds it,
-// opens another project; hide is the sidebar's hide button, last at the
-// right) over the rows.
-export function FolderList({ current, hide }: { current: string; hide?: ReactNode }) {
+// FolderList is the sidebar's "Projects" section: a header (hide first,
+// where the show button sits once hidden, so the toggle does not move;
+// the label folds the list; + opens another project) over the rows. Other
+// devices and the theme are labelled rows at the sidebar's foot
+// (DrawerFoot), on a laptop as on a phone, not bare icons here.
+export function FolderList({ current }: { current: string }) {
   const { open, state, row, sheet, pick } = useFolders(current)
-  const build = useStore((s) => s.build)
   const [folded, setFolded] = useState(() => localStorage.getItem(foldedKey) === '1')
   const [all, setAll] = useState(false)
-  const [devices, setDevices] = useState(false)
-  const [dark, setDarkState] = useState(isDark)
-  const toggleDark = () => {
-    setDark(!dark)
-    setDarkState(!dark)
-  }
-  // devices, theme, + and hide
-  const { head, label, narrow } = useNarrow(hide ? 4 : 3)
-  const { more, setMore } = useMenu()
   const fold = () => {
     setFolded(!folded)
     localStorage.setItem(foldedKey, folded ? '0' : '1')
@@ -207,7 +300,7 @@ export function FolderList({ current, hide }: { current: string; hide?: ReactNod
   // work).
   let shown = open
   if (!all && open.length > maxRows + 1) {
-    const working = (f: Folder) => f.path !== current && (state(f) === 'run' || state(f) === 'tasks')
+    const working = (f: Folder) => f.path !== current && ['needs', 'run', 'tasks'].includes(state(f))
     const recent = open
       .filter((f) => f.path !== current && !working(f))
       .sort((a, b) => (b.updated ?? '').localeCompare(a.updated ?? ''))
@@ -217,57 +310,39 @@ export function FolderList({ current, hide }: { current: string; hide?: ReactNod
   const hidden = open.filter((f) => !shown.includes(f))
   const elsewhere = others(open, current, state)
 
-  // The lesser icons, in the row while it has room for them all and in the
-  // More menu once it does not; + and hide always stay in the row.
-  const lesser = [{ label: 'Other devices', icon: <DevicesIcon />, act: () => setDevices(true) }, themeItem(dark, toggleDark)]
   return (
-    <div className="folder-list">
-      <div className="panel-head" ref={head}>
-        <button className="fold" ref={label} onClick={fold} aria-expanded={!folded} title={build ? `Dakort ${build}` : undefined}>
-          <span className="small faint explorer-title">PROJECTS</span>
-          <span className="faint">{folded ? '▸' : '▾'}</span>
+    <div className={cn('folder-list', all && 'all')}>
+      {/* A section header after VS Code's: the disclosure flush left, the
+          title, and its action on the right, shown under the pointer. */}
+      <div className="side-head">
+        <button className="fold" onClick={fold} aria-expanded={!folded}>
+          <Icon name="chevron-right" sm className={'fold-caret' + (folded ? '' : ' open')} />
+          <span className="explorer-title">Projects</span>
         </button>
-        <StreamDot quiet />
+        <StreamDot />
+        {/* Folded, the projects' news rides on the header, on the label's
+            line (VS Code's badge on a folded section). */}
         {folded && elsewhere && <ActivityDot st={elsewhere} />}
         <span className="grow" />
-        {narrow ? (
-          <button className="icon theme-btn" onClick={(e) => setMore(more ? null : e.currentTarget.getBoundingClientRect())} aria-label="More" aria-expanded={!!more} title="More">
-            <MoreIcon />
-          </button>
-        ) : (
-          lesser.map((it) => (
-            <button key={it.label} className="icon theme-btn" onClick={it.act} aria-label={it.label} title={it.label}>
-              {it.icon}
-            </button>
-          ))
-        )}
-        <button className="icon" onClick={pick} aria-label="Open project" title="Open project">
-          <PlusIcon />
-        </button>
-        {hide}
+        <span className="side-actions">
+          <Button variant="ghost" size="icon-xs" className="text-muted-foreground hover:text-foreground" onClick={pick} aria-label="Open project" title="Open project">
+            <PlusIcon />
+          </Button>
+        </span>
       </div>
-      {more && narrow && (
-        <div className="tab-menu head-menu" role="menu" style={{ left: more.left, top: more.bottom + 2 }}>
-          {lesser.map((it) => (
-            <button key={it.label} role="menuitem" onClick={() => (setMore(null), it.act())}>
-              {it.icon}
-              {it.label}
-            </button>
-          ))}
-        </div>
-      )}
       {!folded && (
         <>
           {shown.map((f) => row(f))}
           {hidden.length > 0 && (
-            <div className="folder-row more" onClick={() => setAll(true)}>
-              {hidden.some((f) => state(f)) ? <span className="dot unread" title="finished, not seen" /> : <span className="dot" />}
-              {hidden.length} more…
+            <div className={cn('folder-row more text-muted-foreground', 'rounded-md text-sm hover:bg-sidebar-accent hover:text-sidebar-accent-foreground')} role="button" tabIndex={0} onKeyDown={activate(() => setAll(true))} onClick={() => setAll(true)}>
+              <span className="lead" />
+              <span className="grow">{hidden.length} more…</span>
+              <span className="row-end">{hidden.some((f) => state(f)) && <ActivityDot st={others(hidden, '', state)} />}</span>
             </div>
           )}
           {all && open.length > maxRows + 1 && (
-            <div className="folder-row more" onClick={() => setAll(false)}>
-              <span className="dot" />
+            <div className={cn('folder-row more text-muted-foreground', 'rounded-md text-sm hover:bg-sidebar-accent hover:text-sidebar-accent-foreground')} role="button" tabIndex={0} onKeyDown={activate(() => setAll(false))} onClick={() => setAll(false)}>
+              <span className="lead" />
               Fewer
             </div>
           )}
@@ -275,9 +350,93 @@ export function FolderList({ current, hide }: { current: string; hide?: ReactNod
       )}
       <VersionLine />
       {sheet}
-      {devices && <Devices onClose={() => setDevices(false)} />}
     </div>
   )
+}
+
+// Brand is the sidebar's top line: Dakort's mark and name, quiet, as
+// Linear, Cursor and Zed head theirs. On the tab bar's line.
+export function Brand() {
+  return (
+    <div className="brand" aria-hidden="true">
+      <Mark />
+      <span className="brand-name">Dakort</span>
+    </div>
+  )
+}
+
+// DrawerFoot is the phone drawer's foot: the terminal (the header's room
+// goes to the tab's title there) and the settings menu. On a laptop the
+// sidebar has no foot, so the file tree keeps the whole height, and the
+// settings are a gear at the tab bar's end (Cursor's, VS Code's Manage).
+export function DrawerFoot({ onDevices, onTerminal }: { onDevices: () => void; onTerminal: () => void }) {
+  const row = cn('foot-row', 'rounded-md text-sm hover:bg-sidebar-accent hover:text-sidebar-accent-foreground')
+  return (
+    <div className="drawer-foot">
+      <button className={row} onClick={onTerminal}>
+        <span className="lead">
+          <TerminalIcon />
+        </span>
+        <span className="grow">Terminal</span>
+      </button>
+      <SettingsMenu onDevices={onDevices} side="top">
+        <button className={row}>
+          <span className="lead">
+            <SettingsIcon />
+          </span>
+          <span className="grow">Settings</span>
+        </button>
+      </SettingsMenu>
+    </div>
+  )
+}
+
+// SettingsMenu holds what used to sit at the sidebar's foot: Other devices
+// and the theme, then the version, quiet, at the end (Linear's and Claude
+// desktop's account menu).
+export function SettingsMenu({ onDevices, children, side = 'bottom' }: { onDevices: () => void; children: ReactNode; side?: 'top' | 'bottom' | 'right' }) {
+  const [dark, setDarkState] = useState(isDark)
+  const build = useStore((s) => s.build)
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
+      <DropdownMenuContent side={side} align="end" className="settings-menu min-w-52">
+        <DropdownMenuItem onSelect={onDevices}>
+          <DevicesIcon />
+          Other devices
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          role="menuitemcheckbox"
+          aria-checked={dark}
+          onSelect={(e) => {
+            e.preventDefault()
+            setDark(!dark)
+            setDarkState(!dark)
+          }}
+        >
+          <MoonIcon />
+          <span className="grow">Dark mode</span>
+          <SwitchLook on={dark} className="ml-4" />
+        </DropdownMenuItem>
+        {build && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Dakort {build}</DropdownMenuLabel>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+// tipPath is a path as a tip shows it: a line may break after a slash
+// and never at a hyphen (a hyphen at a line's end reads as the
+// typesetter's, and is dropped when the path is retyped).
+export const tipPath = (p: string) => p.replace(/-/g, '\u2011').replace(/([\\/])/g, '$1\u200b')
+
+// A failed last turn: an error, or a result that says it did not finish.
+export function failed(e?: { result?: { ok: boolean }; error?: string }): boolean {
+  return !!e && (!!e.error || e.result?.ok === false)
 }
 
 // VersionLine, under the folder list, shows only for a server that
@@ -302,64 +461,15 @@ function VersionLine() {
   )
 }
 
-// The theme switch, light and dark, remembered on this device. It shows
-// what a tap gives: the moon in light, the sun in dark.
-function themeItem(dark: boolean, toggle: () => void) {
-  const label = dark ? 'Switch to light' : 'Switch to dark'
-  return { label, icon: dark ? <SunIcon /> : <MoonIcon />, act: toggle }
-}
-
-// useNarrow tells whether the header row lacks room for every icon (n of
-// them, 36 px each and a 4 px gap) beside the PROJECTS label and a dot's
-// room. Laptop only: the phone's drawer keeps its full row. The need does
-// not depend on the answer, so the row does not flip back and forth.
-function useNarrow(n: number) {
-  const head = useRef<HTMLDivElement>(null)
-  const label = useRef<HTMLButtonElement>(null)
-  const [narrow, setNarrow] = useState(false)
-  useLayoutEffect(() => {
-    const el = head.current
-    if (!el) return
-    const check = () => {
-      const need = 12 + 4 + (label.current?.offsetWidth ?? 0) + 4 + 14 + n * 40
-      setNarrow(matchMedia('(min-width: 900px)').matches && el.clientWidth < need)
-    }
-    check()
-    const ro = new ResizeObserver(check)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [n])
-  return { head, label, narrow }
-}
-
-// The More menu closes on a tap elsewhere, Escape, or the window losing focus.
-function useMenu() {
-  const [more, setMore] = useState<DOMRect | null>(null)
-  useEffect(() => {
-    if (!more) return
-    const off = (e: Event) => !(e.target as HTMLElement).closest?.('.head-menu, .folder-list [aria-label="More"]') && setMore(null)
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setMore(null)
-    addEventListener('pointerdown', off, true)
-    addEventListener('blur', off)
-    addEventListener('keydown', esc)
-    return () => {
-      removeEventListener('pointerdown', off, true)
-      removeEventListener('blur', off)
-      removeEventListener('keydown', esc)
-    }
-  }, [more])
-  return { more, setMore }
-}
-
 // What the other open folders are doing: 'run' when a turn runs in one
 // (it wins: it is what "is it still working?" asks), 'unread' when one
 // has finished work not yet seen, 'tasks' when only background tasks run
 // in one, else ''.
-type Activity = '' | 'run' | 'unread' | 'tasks'
-const titles: Record<Activity, string> = { '': '', run: 'working', unread: 'finished, not seen', tasks: tasksTitle }
+type Activity = '' | 'needs' | 'run' | 'fail' | 'unread' | 'tasks'
+const titles: Record<Activity, string> = { '': '', needs: 'Needs you: a permission to answer', run: 'Working', fail: 'Failed, not seen', unread: 'Finished, not seen', tasks: tasksTitle }
 function others(open: Folder[], current: string, state: (f: Folder) => string): Activity {
   const rest = open.filter((f) => f.path !== current).map(state)
-  return rest.includes('run') ? 'run' : rest.includes('unread') ? 'unread' : rest.includes('tasks') ? 'tasks' : ''
+  return rest.includes('needs') ? 'needs' : rest.includes('run') ? 'run' : rest.includes('fail') ? 'fail' : rest.includes('unread') ? 'unread' : rest.includes('tasks') ? 'tasks' : ''
 }
 
 // The dot for the other folders, where they are out of sight: pulsing while
@@ -367,7 +477,7 @@ function others(open: Folder[], current: string, state: (f: Folder) => string): 
 // finished.
 export function ActivityDot({ st }: { st: Activity }) {
   if (!st) return null
-  return <span className={'dot ' + st} title={titles[st] + ' (another project)'} />
+  return <span className={'dot ' + st} role="img" aria-label={titles[st] + ' (another project)'} />
 }
 
 // With the explorer hidden, a dot on its button says the same.

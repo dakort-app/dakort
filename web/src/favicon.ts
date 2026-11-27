@@ -1,34 +1,40 @@
-// The browser tab's icon says what the agents are doing, through the d
-// itself: white on blue when all is quiet, orange on blue while a turn
-// runs in this tab's folder (an orange contour alone was too faint at
-// 16 px), and white on an orange tile when one finished
-// there that nobody has looked at yet (see showIcon in store.ts). Done is
-// the loud one: it is the state that asks for you.
+// The browser tab's icon says what the agents are doing, each state by a
+// shape and a tone of its own, so it reads at 16 px among other sites'
+// icons and not by hue alone: the ink d on Dakort's lime square when all
+// is quiet (light), inverted to a lime d on an ink square while a turn
+// runs in this tab's folder (dark), and a round green disc, the app's
+// accent (--primary), when one finished there that nobody has looked at
+// yet (see showIcon in store.ts). Done is the one that asks for you, so it
+// is the one that changes shape. In a dark browser the disc is a brighter
+// green with a dark d, so it does not sink into a dark tab strip and still
+// differs in tone from the idle lime. It was cobalt until the redesign
+// made green the one accent.
 
 export type IconState = 'idle' | 'run' | 'done'
 
-const orange = '#f08a4b'
+const lime = '#c7f24f'
+const ink = '#14170e'
+const green = '#4d7c0f'
+const greenDark = '#84cc16'
 
-// The d: a ring and a stem.
-const d = (color: string) =>
-  `<circle cx="26" cy="38" r="10" fill="none" stroke="${color}" stroke-width="7.5"/>` +
-  `<rect x="34" y="10" width="7.5" height="42" rx="3.75" fill="${color}"/>`
+// The d: a bowl and a stem cut like a highlighter's tip. public/favicon.svg
+// is the idle one, drawn alike.
+const D = 'M40 13L48 8V56H40V53.86A16 16 0 1 1 40 26.14ZM32 32a8 8 0 1 0 0 16a8 8 0 1 0 0-16Z'
+const d = (color: string) => `<path fill="${color}" fill-rule="evenodd" d="${D}"/>`
 
 const tile = (fill: string) => `<rect width="64" height="64" rx="14" fill="${fill}"/>`
 
 const bodies: Record<IconState, string> = {
-  idle: tile('url(#g)') + d('#fff'), // public/favicon.svg is this one, drawn alike
-  run: tile('url(#g)') + d(orange),
-  done: tile(orange) + d('#fff'),
+  idle: tile(lime) + d(ink),
+  run: tile(ink) + d(lime),
+  // The d a little smaller, to sit inside the round edge.
+  done:
+    `<style>.b{fill:${green}}.f{fill:#fff}@media (prefers-color-scheme:dark){.b{fill:${greenDark}}.f{fill:${ink}}}</style>` +
+    `<circle class="b" cx="32" cy="32" r="32"/><path class="f" fill-rule="evenodd" transform="translate(3.2 1.6) scale(.9)" d="${D}"/>`,
 }
 
 export function faviconSVG(st: IconState): string {
-  return (
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">' +
-    '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5b8fd0"/><stop offset="1" stop-color="#2d5a92"/></linearGradient></defs>' +
-    bodies[st] +
-    '</svg>'
-  )
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">' + bodies[st] + '</svg>'
 }
 
 let shown: IconState = 'idle' // what index.html's favicon.svg shows

@@ -125,7 +125,13 @@ type turn struct {
 	closing  bool         // the result is in; the process is exiting
 	held     bool         // between turns, kept alive for its background tasks
 	stopNext bool         // a stop came before the CLI took the prompt up: interrupt at its init
-	tasks    []agent.Task // the background tasks running now
+	tasks    []agent.Task // the background tasks running now, with what else is known (describe)
+	// What describes a background task beyond the CLI's list: the
+	// process's Agent and Bash calls by tool_use id, what task_started and
+	// task_progress said by task id, and when each task began.
+	calls map[string]agent.ToolCall
+	info  map[string]agent.Task
+	began map[string]time.Time
 	// The process has run a background task. An ended task's notice can
 	// start a turn seconds after the task list went empty, even after a
 	// turn in between, so such a process is held after every result and
@@ -675,12 +681,20 @@ func (r *runner) run(t *turn, proc process, msg agent.Message) {
 			if len(ev.Tasks) > 0 {
 				t.hadTasks = true
 			}
-			t.tasks = ev.Tasks
+			t.tasks = t.describe(ev.Tasks, time.Now())
+			tasks := t.tasks
 			linger := t.held && len(t.tasks) == 0
 			r.mu.Unlock()
-			r.hub.publish(Ev{Type: "tasks", Session: s, Tasks: ev.Tasks})
+			r.hub.publish(Ev{Type: "tasks", Session: s, Tasks: tasks})
 			if linger {
 				go r.closeIfIdle(t, proc)
+			}
+		case agent.KindTaskInfo:
+			r.mu.Lock()
+			tasks := t.learn(*ev.TaskInfo, time.Now())
+			r.mu.Unlock()
+			if tasks != nil {
+				r.hub.publish(Ev{Type: "tasks", Session: s, Tasks: tasks})
 			}
 		case agent.KindTextDelta, agent.KindThinkingDelta:
 			if ev.ParentToolUseID != "" {
@@ -692,6 +706,16 @@ func (r *runner) run(t *turn, proc process, msg agent.Message) {
 			}
 			r.hub.publish(Ev{Type: "delta", Session: s, Index: ev.Index, Kind: kind, Text: ev.Text})
 		case agent.KindAssistant, agent.KindUser:
+			if len(ev.ToolCalls) > 0 {
+				r.mu.Lock()
+				if t.calls == nil {
+					t.calls = map[string]agent.ToolCall{}
+				}
+				for _, c := range ev.ToolCalls {
+					t.calls[c.ID] = c
+				}
+				r.mu.Unlock()
+			}
 			e := Ev{Type: "appended", Session: s, Kind: string(ev.Kind), UUID: ev.UUID}
 			if ev.Replay {
 				e.PromptID = t.promptID
@@ -1026,4 +1050,78 @@ func mainWindow(w map[string]int, model string) int {
 		}
 	}
 	return 0
+}
+
+// describe fills in what is known about each of the CLI's tasks: its
+// task_started and task_progress words, the call that started it, and
+// when it began (the first time the server heard of it, or earlier if a
+// task_progress said how long it had run). Called with r.mu held.
+func (t *turn) describe(tasks []agent.Task, now time.Time) []agent.Task {
+	if t.began == nil {
+		t.began = map[string]time.Time{}
+	}
+	out := make([]agent.Task, len(tasks))
+	for i, k := range tasks {
+		if in, ok := t.info[k.ID]; ok {
+			if k.Type == "" {
+				k.Type = in.Type
+			}
+			k.ToolUseID, k.Subagent, k.Steps, k.Last = in.ToolUseID, in.Subagent, in.Steps, in.Last
+		}
+		if c, ok := t.calls[k.ToolUseID]; ok && k.ToolUseID != "" {
+			k.Model, k.Command = c.Model, c.Command
+			if k.Subagent == "" {
+				k.Subagent = c.Subagent
+			}
+		}
+		at, ok := t.began[k.ID]
+		if !ok {
+			at = now
+			t.began[k.ID] = at
+		}
+		k.Started = at.UTC().Format(time.RFC3339)
+		out[i] = k
+	}
+	return out
+}
+
+// learn folds a task_started or task_progress line into what is known
+// about that task, and gives the task list to publish again when the task
+// is on it (nil otherwise). Called with r.mu held.
+func (t *turn) learn(in agent.Task, now time.Time) []agent.Task {
+	if t.info == nil {
+		t.info = map[string]agent.Task{}
+	}
+	if t.began == nil {
+		t.began = map[string]time.Time{}
+	}
+	k := t.info[in.ID]
+	k.ID = in.ID
+	if in.Type != "" {
+		k.Type = in.Type
+	}
+	if in.ToolUseID != "" {
+		k.ToolUseID = in.ToolUseID
+	}
+	if in.Subagent != "" {
+		k.Subagent = in.Subagent
+	}
+	if in.Steps > 0 {
+		k.Steps = in.Steps
+	}
+	if in.Last != "" {
+		k.Last = in.Last
+	}
+	t.info[in.ID] = k
+	at := now.Add(-time.Duration(in.Running) * time.Millisecond)
+	if was, ok := t.began[in.ID]; !ok || at.Before(was) {
+		t.began[in.ID] = at
+	}
+	for _, x := range t.tasks {
+		if x.ID == in.ID {
+			t.tasks = t.describe(t.tasks, now)
+			return t.tasks
+		}
+	}
+	return nil
 }

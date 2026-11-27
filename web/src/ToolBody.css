@@ -1,0 +1,230 @@
+/* An open tool call and the permission card's preview (ToolBody.tsx),
+   loaded with that chunk, not in the first load. The tokens are
+   styles.css's. */
+
+.raw-toggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: var(--touch);
+  min-height: var(--row);
+  margin: calc(-1 * var(--sp-1)) 0 calc(-1 * var(--sp-2)) calc(-1 * var(--sp-2));
+  padding: 0 var(--sp-2);
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--t-sm);
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .raw-toggle:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
+}
+/* An edit as a unified diff: teal added and peach removed lines, each
+   with a 3 px gutter bar and its sign as well, so the two never rest on
+   hue alone. Lines wrap rather than scroll on a phone. */
+.diff-card {
+  overflow: hidden;
+  background: var(--raised); /* one card for code, edits and commands: the raised fill, no rule under the head */
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.diff-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--raised);
+  /* The UI face, as the file bar names a file. */
+  font: var(--t-ui) / var(--lh-ui) var(--font-sans);
+}
+.diff-path {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  color: var(--text);
+}
+.diff-path b {
+  flex-shrink: 0;
+  overflow-wrap: anywhere;
+}
+.diff-path b {
+  font-weight: 500;
+}
+.diff-dir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+.diff-lines {
+  padding: var(--sp-1) 0;
+  font: var(--t-code) / 1.54 var(--font-mono);
+}
+.diff-hunk + .diff-hunk {
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-1);
+  border-top: 1px dashed var(--line);
+}
+.diff-line {
+  display: flex;
+  border-left: 3px solid transparent;
+}
+.diff-line.add {
+  background: var(--diff-add);
+  border-left-color: var(--diff-add-bar);
+}
+.diff-line.del {
+  background: var(--diff-del);
+  border-left-color: var(--diff-del-bar);
+}
+.diff-sign {
+  flex: 0 0 2.5ch;
+  text-align: center;
+  color: var(--faint);
+  user-select: none;
+}
+.diff-line.add .diff-sign {
+  color: var(--ok);
+}
+.diff-line.del .diff-sign {
+  color: var(--err);
+}
+.diff-text {
+  flex: 1;
+  min-width: 0;
+  padding-right: var(--sp-3);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* A line that wraps hangs its continuation two characters in, so it does
+   not read as a line of its own. */
+.diff-text {
+  padding-left: 2ch;
+  text-indent: -2ch;
+}
+/* A command and its output, terminal style: dark text on the raised
+   panel, the output cut to 14 lines until "Show all". A failure is the
+   cross and the word in red, the output itself stays readable. */
+.term {
+  overflow: hidden;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  font: var(--t-code) / 1.54 var(--font-mono);
+}
+.term-cmd {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-1) var(--sp-2) var(--sp-3);
+  color: var(--text);
+}
+.term-text {
+  flex: 1;
+  min-width: 0;
+  /* A terminal's wrap: lines fill to the edge, never ending on a hyphen
+     that reads as part of a flag. */
+  word-break: break-all;
+  /* A command that wraps hangs its continuation past the "$ ". */
+  padding-left: 2ch;
+  text-indent: -2ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.term-cmd .code-copy.copied {
+  color: var(--ok);
+}
+/* Centred on the command's first line (the term's 1.54 line, not the
+   button's own em). */
+.term-cmd .code-copy {
+  margin: calc((var(--t-code) * 1.54 - var(--row)) / 2) 0;
+}
+@media (pointer: fine) {
+  .term-cmd .code-copy {
+    margin-block: calc((var(--t-code) * 1.54 - var(--ctl-sm)) / 2);
+  }
+}
+.term-prompt {
+  margin-right: 1ch;
+  color: var(--faint);
+  user-select: none;
+}
+.term-out {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--text-2);
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.term-out.short {
+  max-height: calc(14 * 1.54em + 2 * var(--sp-2));
+  overflow: hidden;
+}
+.term-empty {
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--faint);
+  font-family: var(--font-sans);
+}
+.term-empty:empty {
+  display: none;
+}
+.term-out-wrap.failed {
+  /* The bar drawn inside, so the output keeps the command's text edge. */
+  box-shadow: inset 3px 0 0 var(--err);
+}
+.show-all {
+  display: block;
+  width: 100%;
+  min-height: var(--row);
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: none;
+  color: var(--cobalt);
+  font: var(--t-sm) var(--font-sans);
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .show-all:hover {
+    background: var(--hover);
+  }
+}
+/* Any other call's input as names and values. */
+.kv {
+  display: grid;
+  gap: var(--sp-1);
+  margin: 0;
+}
+.kv-row {
+  display: grid;
+  grid-template-columns: minmax(5em, max-content) 1fr;
+  gap: var(--sp-3);
+}
+.kv-row:has(.mono-block) {
+  grid-template-columns: 1fr;
+  gap: var(--sp-half);
+}
+.kv dt {
+  color: var(--faint);
+}
+.kv dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.kv dd.mono-block {
+  max-height: 240px;
+  overflow: auto;
+  padding: var(--sp-1) var(--sp-2);
+  white-space: pre-wrap;
+  font: var(--t-code) / 1.54 var(--font-mono);
+  background: var(--raised);
+  border-radius: var(--r-sm);
+}

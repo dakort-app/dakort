@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isRelative, join, loadMath, mathReady, render } from './mdrender'
+import { codeLangs, isRelative, join, loadLangs, loadMath, mathReady, render } from './mdrender'
 
 const resolve = (href: string, kind: 'image' | 'link') => (kind === 'image' ? '/raw?p=' + href : '#')
 
@@ -42,13 +42,45 @@ describe('markdown files', () => {
     expect(html).not.toContain('<img src=x')
   })
 
-  it('gives each code block a Copy button beside its pre, code still escaped', () => {
-    for (const src of ['```sh\necho <b>\n```', '    indented <b>']) {
+  it('gives each code block a header with its language and a Copy button, over its pre, code still escaped', () => {
+    for (const [src, lang] of [['```sh\necho <b>\n```', 'sh'], ['    indented <b>', '']]) {
       const html = render(src)
-      expect(html).toMatch(/^<div class="code-block"><pre[^>]*><code[^>]*>[^<]*&lt;b&gt;\n<\/code><\/pre>\n?<button type="button" class="code-copy"/)
+      expect(html).toMatch(
+        new RegExp(`^<div class="code-block"><div class="code-head"><span class="code-lang">${lang}</span><button type="button" class="code-copy"[\\s\\S]*?</button></div><pre[^>]*><code[^>]*>[^<]*&lt;b&gt;\\n</code></pre>`),
+      )
       expect(html.match(/<button/g)).toHaveLength(1)
     }
     expect(render('inline `code` only')).not.toContain('code-copy')
+    expect(render('```<img src=x>\nx\n```')).not.toContain('<img')
+  })
+
+  it('shows YAML front matter as names and values, keeping source lines', () => {
+    const html = render('---\nname: release\ndescription: "Tag <it>"\n  and publish\n---\n\n# Title\n')
+    expect(html).toMatch(/^<dl class="front-matter" data-line="1"><div><dt>name<\/dt><dd>release<\/dd><\/div><div><dt>description<\/dt><dd>Tag &lt;it&gt; and publish<\/dd><\/div><\/dl>/)
+    expect(html).toContain('<h1 data-line="7" dir="auto">Title</h1>')
+    expect(html).not.toContain('<hr')
+    expect(render('text\n\n---\n\nmore')).toContain('<hr')
+  })
+
+  it('right-aligns columns of numbers and keeps short inline code whole', () => {
+    const html = render('| a | n |\n|---|---|\n| x | 12 |\n| y | 3.5% |\n')
+    expect(html).toContain('<td class="short num"')
+    expect(html).toContain('<td class="short">x')
+    expect(render('`data-theme`')).toContain('<code class="nb">data-theme</code>')
+    expect(render('`' + 'a'.repeat(30) + '`')).not.toContain('nb')
+  })
+
+  it('colours code once its language is in, and names only the languages it knows', async () => {
+    const src = '```ts\nconst a: number = 1 // one\n```\n\n```weird\nx\n```'
+    expect(codeLangs(src)).toEqual(['ts'])
+    expect(render(src)).not.toContain('s-kw')
+    await new Promise<void>((done) => loadLangs(codeLangs(src), done))
+    const html = render(src)
+    expect(html).toContain('<span class="s-kw">const</span>')
+    expect(html).toContain('<span class="s-type">number</span>')
+    expect(html).toContain('<span class="s-num">1</span>')
+    expect(html).toContain('<span class="s-com">// one</span>')
+    expect(codeLangs(src)).toEqual([])
   })
 
   it('renders math once KaTeX is in, and leaves prices alone', async () => {
@@ -73,19 +105,19 @@ describe('tables', () => {
     )
     const classes = [...html.matchAll(/<t[hd] class="(\w+)"/g)].map((m) => m[1])
     expect(classes).toEqual(['short', 'long', 'short', 'short', 'long', 'short', 'short', 'long', 'short'])
-    expect(html).toContain('<p data-line="6">after</p>')
+    expect(html).toContain('<p data-line="6" dir="auto">after</p>')
   })
 })
 
 describe('source lines', () => {
   it('stamps each block, items included, with the line it starts at', () => {
     const html = render(['# Title', '', 'one', 'two', '', '- a', '- b', '', '```', 'x', '```', '', '> q'].join('\n'))
-    expect(html).toContain('<h1 data-line="1">')
-    expect(html).toContain('<p data-line="3">one')
-    expect(html).toContain('<ul data-line="6">')
+    expect(html).toContain('<h1 data-line="1" dir="auto">')
+    expect(html).toContain('<p data-line="3" dir="auto">one')
+    expect(html).toContain('<ul data-line="6" dir="auto">')
     expect(html).toContain('<li data-line="7">b')
     expect(html).toContain('<code data-line="9">')
-    expect(html).toContain('<blockquote data-line="13">')
-    expect(html).not.toContain('<p data-line="6">') // a tight item's paragraph renders nothing
+    expect(html).toContain('<blockquote data-line="13" dir="auto">')
+    expect(html).not.toMatch(/<p data-line="6"[ >]/) // a tight item's paragraph renders nothing
   })
 })

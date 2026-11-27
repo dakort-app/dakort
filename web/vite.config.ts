@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+import { fileURLToPath } from 'node:url'
 import { FILE_ICON_NAMES, GENERIC } from './src/fileicons'
 
 // Icons from two open sets, cut out at build time so the bundle carries
@@ -46,7 +48,8 @@ function icons(): Plugin {
 // nothing and churn every commit. `npm run dev` proxies the API to a
 // server on 3002 (the fork holds 3001 on this laptop).
 export default defineConfig({
-  plugins: [react(), icons()],
+  plugins: [react(), tailwindcss(), icons()],
+  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
   build: {
     outDir: '../internal/server/ui',
     emptyOutDir: true,

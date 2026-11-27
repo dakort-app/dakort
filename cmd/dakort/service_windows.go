@@ -73,6 +73,10 @@ func (s winService) definition() string {
 		fmt.Sprintf(`"%s" %s >> "%s" 2>&1`, s.exe(), strings.Join(args, " "), s.log()),
 		"set code=%errorlevel%",
 		fmt.Sprintf(`echo [%%date%% %%time%%] exited with %%code%% >> "%s"`, s.log()),
+		"rem A build the antivirus took away, or a fresh one that failed, gives way to the one before it.",
+		fmt.Sprintf(`if not exist "%s" goto back`, s.exe()),
+		`if defined fresh if not "%code%"=="75" if not "%code%"=="0" goto back`,
+		"set fresh=",
 		"rem 75: a restart was asked for; swap in the staged build, if any, and go again.",
 		"rem The old binary is renamed aside first: a program still running from it",
 		"rem (dakort update, waiting to report) keeps it from being written over, not from a rename.",
@@ -81,7 +85,16 @@ func (s winService) definition() string {
 		fmt.Sprintf(`  del /q "%s.old" >nul 2>&1`, s.exe()),
 		fmt.Sprintf(`  move /y "%s" "%s.old" >> "%s" 2>&1`, s.exe(), s.exe(), s.log()),
 		fmt.Sprintf(`  move /y "%s" "%s" >> "%s" 2>&1`, s.staged(), s.exe(), s.log()),
+		"  set fresh=1",
 		")",
+		"goto run",
+		":back",
+		"set fresh=",
+		fmt.Sprintf(`if not exist "%s.old" exit /b %%code%%`, s.exe()),
+		fmt.Sprintf(`echo [%%date%% %%time%%] the new build did not run; going back to the one before it >> "%s"`, s.log()),
+		fmt.Sprintf(`del /q "%s.bad" >nul 2>&1`, s.exe()),
+		fmt.Sprintf(`if exist "%s" move /y "%s" "%s.bad" >> "%s" 2>&1`, s.exe(), s.exe(), s.exe(), s.log()),
+		fmt.Sprintf(`move /y "%s.old" "%s" >> "%s" 2>&1`, s.exe(), s.exe(), s.log()),
 		"goto run",
 		"",
 	}
@@ -152,7 +165,12 @@ if ($Remove) {
   exit 0
 }
 if (Test-Path "$Cmd.new") { Move-Item -Force "$Cmd.new" $Cmd }
-if (Test-Path $Staged) { Move-Item -Force $Staged $Exe }
+if (Test-Path $Staged) {
+  # The build it replaces stays as .old, for the wrapper to go back to
+  # if the antivirus takes the new one away.
+  if (Test-Path $Exe) { Move-Item -Force $Exe "$Exe.old" }
+  Move-Item -Force $Staged $Exe
+}
 $user = "$env:USERDOMAIN\$env:USERNAME"
 if ($AtLogon) {
   # In the user's session a console window would show, so a headless console host runs the wrapper.

@@ -1,0 +1,55 @@
+/* The archive view's rows (ArchiveView.tsx), loaded with it. */
+/* Archives: a tree like the explorer's, with size and date columns. */
+.archive-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--row);
+  padding-right: var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--t-ui);
+}
+.archive-row.dir {
+  cursor: pointer;
+}
+/* Only a folder does anything, so only a folder takes the hover tint. */
+@media (hover: hover) {
+  .archive-row.dir:hover {
+    background: var(--hover);
+  }
+}
+/* The list is a scroll box: the ring sits inside the row. */
+.archive-row:focus-visible {
+  outline-offset: -2px;
+}
+.archive-twisty {
+  width: var(--icon-xs);
+  flex: none;
+  display: inline-flex;
+  justify-content: center;
+}
+.archive-twisty svg {
+  transition: transform var(--dur-1) var(--ease-out);
+}
+.archive-twisty.open svg {
+  transform: rotate(90deg);
+}
+.archive-size,
+.archive-date {
+  flex: none;
+  text-align: right;
+  color: var(--text-2);
+  font-size: var(--t-sm);
+  font-variant-numeric: tabular-nums;
+}
+.archive-size {
+  width: 72px;
+}
+.archive-date {
+  width: 96px;
+}
+@media (max-width: 600px) {
+  .archive-date {
+    display: none;
+  }
+}

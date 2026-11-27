@@ -106,7 +106,10 @@ export type Result = {
 export type LiveBlock = { kind: 'text' | 'thinking'; text: string }
 
 // A background command or monitor the session's CLI runs between turns.
-export type Task = { id: string; type: string; description: string }
+// What else the server knows, each optional (agent.Task): the tool call
+// that started it, when it began, an agent's type and asked-for model, a
+// command's line, and progress (steps so far, the latest step's words).
+export type Task = { id: string; type: string; description: string; toolUseId?: string; started?: string; subagent?: string; model?: string; command?: string; steps?: number; last?: string }
 
 // A message sent while a turn ran, waiting on the server (queue.go).
 export type Queued = { promptId: string; text: string; images?: number; error?: string }

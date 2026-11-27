@@ -482,7 +482,17 @@ func TestRealBackgroundTask(t *testing.T) {
 	id, cwd := newTurn(t, base, map[string]any{"permissionMode": "bypassPermissions",
 		"text": "Use the Bash tool with run_in_background set to true to run exactly: sleep 20; echo finished > bg_done.txt . " +
 			"Do not wait for it. Reply with the single word: started."})
+	described := pos
 	st.wait(t, &pos, "a background task", tasks(id, 1))
+	// Described: its command (from the Bash call, found by the tool_use id
+	// task_started gives) and when it began. Read on a cursor of its own,
+	// as the details may come in the first list or after the turn's end.
+	k := st.wait(t, &described, "the task's command", func(e server.Ev) bool {
+		return e.Session == id && e.Type == "tasks" && len(e.Tasks) == 1 && e.Tasks[0].Command != ""
+	}).ev.Tasks[0]
+	if !strings.Contains(k.Command, "sleep 20") || k.ToolUseID == "" || k.Started == "" {
+		t.Errorf("the task's details: %+v", k)
+	}
 	st.wait(t, &pos, "the first turn's end", turnDone(id))
 
 	// Held, not running: a send is taken into the same process.

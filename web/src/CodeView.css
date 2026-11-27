@@ -1,0 +1,37 @@
+/* The code view's surroundings (CodeView.tsx; its CodeMirror theme is in
+   the .tsx), loaded with it. */
+.code-view {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  --code-sel: var(--accent-soft);
+  --code-mark: var(--signature-soft);
+  --code-cur: var(--signature); /* the match Find is on: the full highlighter */
+}
+/* Dark: the washes at 12% and 10%, where the syntax colours (the faint
+   comments the lowest) still read at 4.5:1 or more; the highlighter keeps
+   its colour in an underline or a bar. */
+:root[data-theme='dark'] .code-view {
+  --code-sel: color-mix(in srgb, var(--cobalt) 12%, var(--panel));
+  --code-mark: color-mix(in srgb, var(--signature) 10%, var(--panel));
+  --code-cur: color-mix(in srgb, var(--signature) 60%, var(--panel));
+}
+/* The last lines scroll clear of the phone's home indicator. */
+.code-view .cm-content {
+  padding-bottom: calc(var(--sp-1) + env(safe-area-inset-bottom));
+}
+.sync-gutter .cm-lineNumbers .cm-gutterElement {
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .sync-gutter .cm-lineNumbers .cm-gutterElement:hover {
+    color: var(--cobalt);
+    text-decoration: underline;
+  }
+}
+/* The line a jump from the PDF landed on, for a few seconds. */
+.code-view.jumped .cm-editor .cm-activeLine {
+  background: var(--code-mark);
+  box-shadow: inset 3px 0 0 var(--signature);
+  transition: background var(--dur-3) var(--ease-out);
+}

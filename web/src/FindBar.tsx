@@ -1,5 +1,9 @@
 import type { RefObject } from 'react'
+import { Tool } from './FileView'
 import type { FindOpts } from './pdffind'
+import { CloseIcon, DownIcon, UpIcon } from './viewicons'
+import { toolClass } from '@/lib/tool'
+import { Input } from '@/components/ui/input'
 
 // FindBar sits under a document viewer's bar (PDF, Word): Enter or ↓ finds
 // downward from the view, Shift+Enter or ↑ upward, × or Escape closes. Aa
@@ -28,17 +32,20 @@ export function FindBar({ label, q, onQuery, opts, onOpts, total, cur, onStep, o
         onStep(false)
       }}
     >
-      <input
+      <Input
         ref={input}
-        className="filter"
+        className="filter h-7 px-2 pointer-coarse:h-11"
         autoFocus
         value={q}
         onChange={(e) => onQuery(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Escape') onClose()
-          else if (e.key === 'Enter' && e.shiftKey) {
+          else if (e.key === 'Enter') {
+            // By hand, not the form's submit: with no matches yet the
+            // arrows are disabled, and a disabled default button would
+            // stop Enter from searching at all.
             e.preventDefault()
-            onStep(true)
+            onStep(e.shiftKey)
           } else if (e.altKey && (e.key.toLowerCase() === 'c' || e.key.toLowerCase() === 'w')) {
             e.preventDefault()
             flip(e.key.toLowerCase() === 'c' ? 'matchCase' : 'wholeWord')
@@ -49,32 +56,26 @@ export function FindBar({ label, q, onQuery, opts, onOpts, total, cur, onStep, o
       />
       <button
         type="button"
-        className={'btn small-btn find-opt' + (opts.matchCase ? ' on' : '')}
+        className={toolClass({ on: opts.matchCase, className: 'find-opt' })}
         aria-pressed={!!opts.matchCase}
         onClick={() => flip('matchCase')}
-        title="Match case (Alt+C)"
+        title="Match case"
       >
         Aa
       </button>
       <button
         type="button"
-        className={'btn small-btn find-opt word' + (opts.wholeWord ? ' on' : '')}
+        className={toolClass({ on: opts.wholeWord, className: 'find-opt word' })}
         aria-pressed={!!opts.wholeWord}
         onClick={() => flip('wholeWord')}
-        title="Whole words only (Alt+W)"
+        title="Whole word"
       >
         ab
       </button>
-      <span className="small faint">{total === null ? '' : total ? `${cur + 1} / ${total}` : 'no matches'}</span>
-      <button type="button" className="btn small-btn" onClick={() => onStep(true)} aria-label="Previous match" title="Find upward (Shift+Enter)">
-        ↑
-      </button>
-      <button type="submit" className="btn small-btn" aria-label="Next match" title="Find downward (Enter)">
-        ↓
-      </button>
-      <button type="button" className="icon" onClick={onClose} aria-label="Close find" title="Close (Esc)">
-        ×
-      </button>
+      <span className="find-count">{total === null ? '' : total ? `${cur + 1} / ${total}` : 'No matches'}</span>
+      <Tool label="Previous match" keys="Shift+Enter" icon={<UpIcon />} className="bare" disabled={!total} onClick={() => onStep(true)} />
+      <Tool label="Next match" keys="Enter" icon={<DownIcon />} className="bare" disabled={!total} onClick={() => onStep(false)} />
+      <Tool label="Close find" keys="Esc" icon={<CloseIcon />} className="bare" onClick={onClose} />
     </form>
   )
 }

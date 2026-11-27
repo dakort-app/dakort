@@ -1,7 +1,15 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { HTTPError, postJSON } from './api'
+import { Icon } from './icons'
 import { useStore } from './store'
+import { ProjectRoot } from './ToolView'
 import type { Permission } from './types'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+
+// What the tool would do, as an open tool call shows it (ToolBody.tsx: a
+// command, or the edit as a diff), from the same lazily loaded chunk.
+const PermInput = lazy(() => import('./ToolBody').then((m) => ({ default: m.PermInput })))
 
 // The CLI asks before running a tool. The first answer from any device
 // wins; the others see the card close when the decision comes down the
@@ -10,6 +18,7 @@ import type { Permission } from './types'
 // one tap.
 export function PermissionCard({ session, perm, more }: { session: string; perm: Permission; more: number }) {
   const codex = useStore((s) => s.sessions.find((x) => x.id === session)?.provider === 'codex')
+  const folder = useStore((s) => s.sessions.find((x) => x.id === session)?.folder) ?? ''
   const [why, setWhy] = useState('')
   const [denying, setDenying] = useState(false)
   const [sending, setSending] = useState(false)
@@ -27,70 +36,53 @@ export function PermissionCard({ session, perm, more }: { session: string; perm:
   }
 
   return (
-    <div className="permission">
-      <div className="perm-title">
-        Allow <b>{perm.tool}</b>?{more > 0 && <span className="faint small"> ({more} more waiting)</span>}
-      </div>
-      {perm.description && <div className="small">{perm.description}</div>}
-      {perm.reason && <div className="faint small">{perm.reason}</div>}
-      <ToolInput tool={perm.tool} input={perm.input} />
-      {perm.blockedPath && <div className="faint small">Path: {perm.blockedPath}</div>}
-      {denying && (
-        <input
-          className="filter wide"
-          autoFocus
-          placeholder="Tell Claude what to do instead (optional)"
-          value={why}
-          onChange={(e) => setWhy(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && answer(false)}
-        />
-      )}
-      {error && <div className="error small">{error}</div>}
-      <div className="row-buttons">
-        {denying || codex ? (
-          <button className="btn" disabled={sending} onClick={() => answer(false)}>
-            Deny
-          </button>
-        ) : (
-          <button className="btn" disabled={sending} onClick={() => setDenying(true)}>
-            Deny…
-          </button>
+    <div className="permission" role="region" aria-label="Approval">
+      <div className="perm-card">
+        <div className="perm-title">
+          <Icon name="triangle-alert" sm className="perm-mark" />
+          <span className="perm-q">Allow {perm.tool}?</span>
+          {more > 0 && (
+            <span className="perm-more" title={`${more} more waiting after this one`} data-tip-tap="">
+              {more} more
+            </span>
+          )}
+        </div>
+        {perm.description && <div className="perm-desc">{perm.description}</div>}
+        {perm.reason && <div className="perm-reason">{perm.reason}</div>}
+        <Suspense fallback={<div className="perm-input" />}>
+          <ProjectRoot.Provider value={folder}>
+            <PermInput tool={perm.tool} input={perm.input} />
+          </ProjectRoot.Provider>
+        </Suspense>
+        {perm.blockedPath && <div className="perm-reason">Path: {perm.blockedPath}</div>}
+        {denying && (
+          <Input
+            className="perm-why"
+            autoFocus
+            placeholder="Tell Claude what to do instead (optional)"
+            aria-label="What to do instead"
+            value={why}
+            onChange={(e) => setWhy(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && answer(false)}
+          />
         )}
-        <button className="btn primary" disabled={sending} onClick={() => answer(true)}>
-          Allow
-        </button>
+        {error && <div className="perm-error">{error}</div>}
+        <div className="perm-buttons">
+          {denying || codex ? (
+            <Button variant="outline" size="sm" disabled={sending} onClick={() => answer(false)}>
+              Deny
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" disabled={sending} onClick={() => setDenying(true)}>
+              Deny…
+            </Button>
+          )}
+          <Button variant="default" size="sm" disabled={sending} onClick={() => answer(true)}>
+            Allow
+          </Button>
+        </div>
       </div>
     </div>
   )
 }
 
-const clip = (s: string, n = 4000) => (s.length > n ? s.slice(0, n) + `\n… ${s.length - n} more characters` : s)
-
-// ToolInput shows what the tool would do in the form a person checks it:
-// the command for a shell, the file and the change for an edit.
-function ToolInput({ tool, input }: { tool: string; input: unknown }) {
-  const inp = (input ?? {}) as Record<string, unknown>
-  const s = (k: string) => (typeof inp[k] === 'string' ? (inp[k] as string) : '')
-  if ((tool === 'Bash' || tool === 'PowerShell') && s('command')) {
-    return <div className="pre small perm-input">{clip(s('command'))}</div>
-  }
-  if ((tool === 'Edit' || tool === 'MultiEdit') && s('file_path')) {
-    return (
-      <div className="perm-input">
-        <div className="small">{s('file_path')}</div>
-        {s('old_string') && <div className="pre small diff-old">{clip(s('old_string'), 1500)}</div>}
-        {s('new_string') && <div className="pre small diff-new">{clip(s('new_string'), 1500)}</div>}
-      </div>
-    )
-  }
-  if (tool === 'Write' && s('file_path')) {
-    return (
-      <div className="perm-input">
-        <div className="small">{s('file_path')}</div>
-        <div className="pre small diff-new">{clip(s('content'), 1500)}</div>
-      </div>
-    )
-  }
-  if (input === undefined) return null
-  return <div className="pre small perm-input">{clip(JSON.stringify(input, null, 2))}</div>
-}

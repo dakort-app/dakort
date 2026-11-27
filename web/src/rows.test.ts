@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { answer, group, landed, promptText, toolSummary, type Part } from './rows'
+import { answer, group, landed, promptText, type Part } from './rows'
 import type { Block, Row } from './types'
 
 let n = 0
@@ -52,6 +52,12 @@ describe('background task news', () => {
       'reply:',
       'notice:Monitor event: "ticks": tick 1',
       'reply:',
+    ])
+    // For its bubble: what happened, the task's name, how it ended.
+    const news = items.flatMap((it) => (it.kind === 'notice' ? (it.tasks ?? []) : []))
+    expect(news).toEqual([
+      { label: 'Background task finished', name: 'Build', detail: 'exit code 0' },
+      { label: 'Monitor update', name: 'ticks', detail: 'tick 1' },
     ])
   })
 })
@@ -126,7 +132,9 @@ describe('grouping rows', () => {
       row('assistant', [text('API Error: 529')], { apiError: true }),
       row('assistant', [text('from a subagent')], { sidechain: true }),
     ])
-    expect(items.map((i) => (i.kind === 'notice' ? i.tone : i.kind))).toEqual(['divider', 'divider', 'error'])
+    // The summary is the compaction line's disclosure, not a line of its own.
+    expect(items.map((i) => (i.kind === 'notice' ? i.tone : i.kind))).toEqual(['divider', 'error'])
+    expect(items[0]).toMatchObject({ text: 'Conversation compacted', detail: 'summary...' })
   })
 
   it('marks a lapsed login for the sign-in, not a refresh clash', () => {
@@ -141,15 +149,6 @@ describe('grouping rows', () => {
   it('matches the server on prompt text', () => {
     expect(promptText(row('user', [text('[Image: source: C:\\a.png]'), text('  look  ')]))).toBe('look')
     expect(promptText(row('user', [text('hi')], { meta: true }))).toBe('')
-  })
-
-  it('summarises tool calls in one line', () => {
-    expect(toolSummary({ type: 'tool_use', name: 'Edit', input: { file_path: 'C:\\x\\main.tex' } })).toBe('Edit: main.tex')
-    expect(toolSummary({ type: 'tool_use', name: 'Bash', input: { command: 'a\n  b' } })).toBe('Bash: a b')
-    expect(toolSummary({ type: 'tool_use', name: 'Bash', input: { command: 'cd "C:/x" && git status', description: 'Show working tree status' } })).toBe(
-      'Bash: Show working tree status',
-    )
-    expect(toolSummary({ type: 'tool_use', name: 'Mystery', input: { n: 1 } })).toBe('Mystery')
   })
 })
 
@@ -177,5 +176,17 @@ describe.skipIf(!dump)('grouping real rows', () => {
     // Only a call cut off by the end of the page may lack its result.
     expect(tools - paired).toBeLessThanOrEqual(1)
     console.log(`${rows.length} rows, ${items.length} items, ${tools} tool calls`)
+  })
+})
+
+describe('an interrupt', () => {
+  it('drops the CLI filler reply after it, and keeps real replies', () => {
+    const items = group([
+      row('user', [text('go')]),
+      row('assistant', [text('working')], { model: 'claude-opus-5-5' }),
+      row('user', [text('[Request interrupted by user]')]),
+      row('assistant', [text('No response requested.')], { model: '<synthetic>' }),
+    ])
+    expect(items.map((i) => i.kind)).toEqual(['prompt', 'reply', 'notice'])
   })
 })

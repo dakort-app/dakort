@@ -1,0 +1,134 @@
+/* Tailwind 4 and shadcn/ui (new-york, Radix). The app's older hand-written
+   CSS (styles.css) sits in the legacy layer, between Tailwind's base and its
+   utilities, so a component's utility classes win over it wherever the two
+   meet. */
+@layer theme, base, legacy, components, utilities;
+
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import './styles.css' layer(legacy);
+
+/* The theme follows the data-theme attribute theme.ts sets on <html>. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+/* Stone and Dakort's green on shadcn's variables: one warm-stone grey
+   family in both themes, the mark's green the one accent (primary): the
+   mark's own lime with its ink on it in the dark, a deeper olive of the
+   same hue with white on it in the light (the lime is near white there).
+   Text on it 5:1 light and 14:1 dark, the control against the page 4.9:1
+   and 13:1. Every text pair reaches WCAG AA in both themes. */
+:root {
+  --radius: 0.5rem;
+  --background: #fdfcfa;
+  --foreground: #201e1b;
+  --card: #fdfcfa;
+  --card-foreground: #201e1b;
+  --popover: #fdfcfa;
+  --popover-foreground: #201e1b;
+  --primary: #4d7c0f;
+  --primary-foreground: #ffffff;
+  --secondary: #f5f3ef;
+  --secondary-foreground: #201e1b;
+  --muted: #f5f3ef;
+  --muted-foreground: #67625a;
+  --accent: #ebe8e3;
+  --accent-foreground: #201e1b;
+  --destructive: #b3302a;
+  --border: #e2ded7;
+  --input: #dcd7cf;
+  --ring: #4d7c0f;
+  --sidebar: #f3f1ed;
+  --sidebar-foreground: #201e1b;
+  --sidebar-primary: #4d7c0f;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ebe8e3;
+  --sidebar-accent-foreground: #201e1b;
+  --sidebar-border: #e2ded7;
+  --sidebar-ring: #4d7c0f;
+}
+
+[data-theme='dark'] {
+  --background: #1c1b19;
+  --foreground: #e6e3de;
+  --card: #1c1b19;
+  --card-foreground: #e6e3de;
+  --popover: #252321;
+  --popover-foreground: #e6e3de;
+  --primary: #c7f24f;
+  --primary-foreground: #14170e;
+  --secondary: #252321;
+  --secondary-foreground: #e6e3de;
+  --muted: #252321;
+  --muted-foreground: #9a958c;
+  --accent: #2f2d2a;
+  --accent-foreground: #e6e3de;
+  --destructive: #f2766a;
+  --border: #383532;
+  --input: #45423e;
+  --ring: #c7f24f;
+  --sidebar: #141311;
+  --sidebar-foreground: #e6e3de;
+  --sidebar-primary: #c7f24f;
+  --sidebar-primary-foreground: #14170e;
+  --sidebar-accent: #2f2d2a;
+  --sidebar-accent-foreground: #e6e3de;
+  --sidebar-border: #383532;
+  --sidebar-ring: #c7f24f;
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  /* Lucide icons at the app's one stroke (icons.tsx), shadcn's own too. */
+  .lucide {
+    stroke-width: 1.75;
+  }
+}
+
+/* Unlayered, so above the utilities: the file bar's buttons that leave
+   it for its ⋯ menu when the bar is under 440 px (ToolMenu.tsx). */
+.file-view .narrow-only {
+  display: none;
+}
+@container (max-width: 439px) {
+  .file-view :is(.file-head, .pdf-bar) .wide-only {
+    display: none;
+  }
+  .file-view .narrow-only {
+    display: inline-flex;
+  }
+}

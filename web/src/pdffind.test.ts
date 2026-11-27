@@ -46,4 +46,9 @@ describe('find in a PDF page', () => {
   it('finds nothing for an empty query', () => {
     expect(find(pageText([run('text', 0, 0)]), foldQuery('   '), 1)).toEqual([])
   })
+  it('places a match by the characters\' widths when the run has them', () => {
+    // "iiWW": narrow i's, wide W's; the match "WW" starts after the i's.
+    const r: Run = { str: 'iiWW', x: 10, top: 0, w: 40, h: 12, adv: [0, 4, 8, 24, 40] }
+    expect(find(pageText([r]), 'ww', 1)).toEqual([{ page: 1, x: 18, y: 0, w: 32, h: 12 }])
+  })
 })

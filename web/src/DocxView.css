@@ -1,0 +1,48 @@
+/* The Word view's own styles (DocxView.tsx), loaded with it. */
+/* Word documents: docx-preview's pages on the same grey as a PDF's. */
+.file-docx {
+  flex: 1;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  background: var(--raised);
+  overscroll-behavior: contain;
+}
+/* The pages at their scaled size (DocxView's fit): what lies outside it is
+   the unscaled layout, not content. */
+.docx-sizer {
+  overflow: clip;
+}
+.docx-sizer > div {
+  transform-origin: top left;
+}
+.file-docx .docx-wrapper {
+  background: none;
+  padding: calc(var(--sp-3) / var(--k, 1)) 0 calc((var(--sp-5) + env(safe-area-inset-bottom)) / var(--k, 1));
+}
+.file-docx .docx-wrapper > section.docx {
+  margin: 0 auto calc(var(--sp-3) / var(--k, 1));
+  color: #000; /* black on the white page, also in the dark theme */
+  box-shadow: var(--shadow-1);
+}
+/* A link's ring on the white page: the light theme's focus colour (the
+   dark one is 2.2:1 on white). */
+.file-docx .docx-wrapper > section.docx {
+  --focus: #2459b8;
+}
+/* Find in a Word file: every match, and the one shown. */
+/* The pages are paper in both themes, so the light highlighter. */
+/* The other matches pale and underlined, the one shown the full
+   highlighter, as in a code file. */
+::highlight(docx-find) {
+  background-color: color-mix(in srgb, var(--signature) 45%, #fff);
+  color: #000;
+  /* 2 px on screen at any zoom (--k, DocxView's scale), lifted off a
+     table cell's rule beneath. */
+  text-decoration: underline var(--signature);
+  text-decoration-thickness: calc(2px / var(--k, 1));
+  text-underline-offset: calc(2px / var(--k, 1));
+}
+::highlight(docx-find-cur) {
+  background-color: var(--signature);
+  color: #000;
+}

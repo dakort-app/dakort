@@ -48,14 +48,16 @@ test('a big session at phone size, with older pages loading in place', async ({ 
       const first = items.find((x) => x.getBoundingClientRect().bottom > boxTop)!
       const key = first.dataset.anchor!
       const before = items.length
-      const top = first.getBoundingClientRect().top
+      // By its bottom: older rows of the same reply land inside it, above
+      // what was on screen (its time label goes, it grows at the top).
+      const top = first.getBoundingClientRect().bottom
       for (let i = 0; i < 40 && el.querySelectorAll('[data-anchor]').length === before; i++) await new Promise((r) => setTimeout(r, 100))
       await new Promise((r) => setTimeout(r, 300))
       const same = el.querySelector<HTMLElement>(`[data-anchor="${CSS.escape(key)}"]`)
       return {
         before,
         after: el.querySelectorAll('[data-anchor]').length,
-        moved: same ? same.getBoundingClientRect().top - top : null,
+        moved: same ? same.getBoundingClientRect().bottom - top : null,
       }
     }, step % 2 === 1)
     console.log(`older page ${step + 1} (${step % 2 ? '1.5 screens down' : 'top'}): ${r.before} -> ${r.after} items, anchor moved ${r.moved} px`)
@@ -75,16 +77,24 @@ test('the mode chip shows what the session last ran with', async ({ page }) => {
   const s = await openSession(page, (l) => quiet(l.filter((x) => x.used?.mode).length ? l.filter((x) => x.used?.mode) : l))
   const tail: { rows: { role: string; permissionMode?: string }[] } = await (await page.request.get(`/api/sessions/${s.id}/rows?n=200`)).json()
   const last = tail.rows.filter((r) => r.role === 'user' && r.permissionMode).pop()?.permissionMode
-  const chip = page.locator('.mode-chip select')
-  expect(await chip.locator('option').allTextContents()).toEqual(
+  const chip = page.locator('.composer .mode-chip')
+  const names: Record<string, string> = { default: 'Manual', manual: 'Manual', acceptEdits: 'Edit automatically', plan: 'Plan', auto: 'Auto', bypassPermissions: 'Bypass permissions', dontAsk: "Don't ask" }
+  // Its menu names each mode with what it does, the one in use ticked.
+  await chip.click()
+  const rows = page.locator('.mode-menu .picker-panel [role=option]')
+  expect(await rows.locator('.opt-label').allTextContents()).toEqual(
     last === 'dontAsk'
       ? ['Manual', 'Edit automatically', 'Plan', 'Auto', 'Bypass permissions', "Don't ask"]
       : ['Manual', 'Edit automatically', 'Plan', 'Auto', 'Bypass permissions'],
   )
-  if (last) await expect(chip).toHaveValue(last === 'default' ? 'manual' : last)
-  console.log(`last mode in the transcript: ${last ?? '(none)'}; chip: ${await chip.inputValue()}`)
+  for (const d of await rows.locator('.opt-desc').allTextContents()) expect(d).toMatch(/^(Claude|Codex) .{10,}/)
+  const on = (await page.locator('.mode-menu [role=option][aria-selected=true] .opt-label').textContent())!
+  if (last) expect(on).toBe(names[last])
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.mode-menu .picker-panel')).toHaveCount(0)
+  console.log(`last mode in the transcript: ${last ?? '(none)'}; chip: ${on}`)
   // As wide as the mode's name, not the longest option ("Bypass permissions").
-  if ((await chip.inputValue()) === 'auto') expect((await page.locator('.mode-chip').boundingBox())!.width).toBeLessThan(80)
+  if (on === 'Auto') expect((await chip.boundingBox())!.width).toBeLessThan(80)
 
   // And the model chip: the last reply's model, not the global default.
   const list: { id: string; used?: { model?: string } }[] = await (await page.request.get('/api/sessions')).json()
@@ -92,18 +102,20 @@ test('the mode chip shows what the session last ran with', async ({ page }) => {
   // The names are the CLI's own (the list the page shows), so a new model
   // on this machine needs no change here; an id the list lacks shows as is.
   const cfg = await (await page.request.get('/api/config')).json()
-  const names: Record<string, string> = Object.fromEntries((cfg.claude?.models ?? []).map((m: { full: string; label: string }) => [m.full, m.label]))
-  if (model) await expect(page.locator('.composer .chip-btn')).toContainText(names[model.replace(/\[.*$/, '')] ?? model)
+  const labels: Record<string, string> = Object.fromEntries((cfg.claude?.models ?? []).map((m: { full: string; label: string }) => [m.full, m.label]))
+  if (model) await expect(page.locator('.composer .chip-btn')).toContainText(labels[model.replace(/\[.*$/, '')] ?? model)
   console.log(`last model: ${model ?? '(none)'}; chip: ${await page.locator('.composer .chip-btn').textContent()}`)
 
-  // The cache clock's popup explains the cache; the session's
-  // idle-compaction switch is in the model menu with its other settings.
+  // A tap on the cache clock explains the cache, in the app's tooltip; the
+  // session's idle-compaction switch is in the model menu with its other
+  // settings.
   const clock = page.locator('.cache-clock')
   if (await clock.count()) {
     await clock.click()
-    await expect(page.locator('.cache-tip')).toBeVisible()
+    await expect(page.locator('.tip[data-open]')).toContainText(/cache (warm|cold)/)
     await expect(page.getByRole('switch', { name: 'Compact when idle' })).toHaveCount(0)
     await clock.click()
+    await expect(page.locator('.tip[data-open]')).toHaveCount(0)
   }
 })
 
@@ -384,23 +396,30 @@ test('a missing CLI is named with its install command', async ({ page }) => {
 // settings file, not the live one's): a reload still shows it.
 test('an effort and Chrome pick survive a reload', async ({ page }) => {
   await openSession(page, (l) => l.filter((x) => x.provider !== 'codex' && !x.heldBy && x.size > 50_000).sort((a, b) => a.size - b.size)[0])
-  const low = page.locator('.picker-panel [aria-label="Effort Low"]')
+  // Effort is a compact menu on its row: its button says the pick.
+  const effort = page.locator('.picker-panel .picker-page.on .effort-select')
+  const pickEffort = async (name: string) => {
+    await effort.click()
+    // (Default's row also names what it stands for: "Default High".)
+    await page.getByRole('menuitemradio', name === 'Default' ? { name: /^Default/ } : { name, exact: true }).click()
+    await expect(page.getByRole('menu')).toHaveCount(0)
+  }
   const chrome = page.locator('.picker-panel [role=switch][aria-label=Chrome]')
   await page.locator('.composer .chip-btn').click()
-  await low.click()
-  await expect(low).toHaveClass(/\bon\b/)
+  await pickEffort('Low')
+  await expect(effort).toHaveText('Low')
   await chrome.click()
   await expect(chrome).toHaveAttribute('aria-checked', 'true')
   await page.waitForTimeout(500) // the post
   await page.reload()
   await expect(page.locator('.composer .chip-btn .chip-chrome')).toBeVisible()
   await page.locator('.composer .chip-btn').click()
-  await expect(low).toHaveClass(/\bon\b/)
+  await expect(effort).toHaveText('Low')
   await expect(chrome).toHaveAttribute('aria-checked', 'true')
   await chrome.click()
   await expect(chrome).toHaveAttribute('aria-checked', 'false')
-  await page.locator('.picker-panel [aria-label="Effort Default"]').click()
-  await expect(page.locator('.picker-panel [aria-label="Effort Default"]')).toHaveClass(/\bon\b/)
+  await pickEffort('Default')
+  await expect(effort).toHaveText('Default')
 })
 
 // A new session's pane mounts a fresh composer before the session list
@@ -472,6 +491,8 @@ const menu = (at: Page | Locator) => {
     shown: root.locator('.picker-page.on'),
   }
 }
+// The panel fades in and rises: where it ends up is measured after.
+const risen = (panel: Locator) => panel.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)).then(() => {}))
 // A Claude session of some size nothing is writing to.
 const settled = (l: Session[]) => l.filter((x) => x.provider !== 'codex' && !x.heldBy).sort((a, b) => a.size - b.size).find((x) => x.size > 100_000) ?? l[0]
 
@@ -485,22 +506,18 @@ async function openNew(page: Page) {
   return s
 }
 
-// The page on show is as tall as its rows: no blank below the last one,
-// and no scrolling unless the rows outgrow the panel's max height.
+// The panel is as tall as its taller page, whichever is on show (so it
+// never jumps as the page turns), and scrolls only at its max height.
 async function fitsItsPage(panel: Locator) {
   const fit = await panel.evaluate((el) => {
     el.scrollTop = 0
-    const last = el.querySelector('.picker-page.on')!.lastElementChild!.getBoundingClientRect().bottom
+    const pages = [...el.querySelectorAll('.picker-page')].map((p) => p.getBoundingClientRect().height)
+    const shown = el.querySelector('.picker-page.on')!.getBoundingClientRect().height
     const cs = getComputedStyle(el)
-    return {
-      gap: el.getBoundingClientRect().bottom - parseFloat(cs.borderBottomWidth) - parseFloat(cs.paddingBottom) - last,
-      scrolls: el.scrollHeight > el.clientHeight + 1,
-      max: parseFloat(cs.maxHeight),
-      h: el.getBoundingClientRect().height,
-    }
+    return { tallest: Math.max(...pages), shown, scrolls: el.scrollHeight > el.clientHeight + 1, max: parseFloat(cs.maxHeight), h: el.getBoundingClientRect().height }
   })
-  if (!fit.scrolls) expect(Math.abs(fit.gap)).toBeLessThan(2)
-  else expect(fit.h).toBeGreaterThanOrEqual(fit.max - 2) // scrolls only at its max
+  expect(Math.abs(fit.shown - fit.tallest)).toBeLessThan(1)
+  if (fit.scrolls) expect(fit.h).toBeGreaterThanOrEqual(fit.max - 2) // scrolls only at its max
 }
 
 // A new session's menu turns between Claude and Codex.
@@ -522,29 +539,38 @@ test('the model menu turns between Claude and Codex', async ({ page }, info) => 
   await expect(m.page('codex')).toBeHidden()
   await expect(m.shown).toHaveAttribute('data-agent', 'claude')
   await expect(m.shown.locator('[role=option][aria-selected=true]')).toHaveCount(1)
-  // The session's settings, all in this panel.
-  await expect(m.shown.getByRole('button', { name: 'Effort Default' })).toBeVisible()
-  await expect(m.shown.locator('.effort-step')).toHaveCount(5)
-  for (const name of ['Ultracode', 'Chrome']) await expect(m.shown.getByRole('switch', { name, exact: true })).toBeVisible()
+  // The session's settings, all in this panel: Effort as a compact menu
+  // on its row, Chrome; no Ultracode (review of 2026-11-24).
+  await expect(m.shown.locator('.effort-select')).toHaveText('Default')
+  await expect(m.shown.getByRole('switch', { name: 'Chrome', exact: true })).toBeVisible()
+  await expect(m.shown.getByRole('switch', { name: 'Ultracode' })).toHaveCount(0)
   await expect(m.shown.getByRole('switch', { name: 'Compact when idle' })).toHaveCount(0) // nothing to compact yet
   await fitsItsPage(m.panel)
   await page.screenshot({ path: `test-results/model-menu-${info.project.name}-claude.png` })
+  await risen(m.panel)
   const tabsAt = (await m.tab('codex').boundingBox())!
+  const heightAt = (await m.panel.boundingBox())!.height
 
-  // Codex's tab: its page, no check, no settings; turning picks nothing.
+  // Codex's tab: its page, no check, the same layout with the settings
+  // that apply to Codex (Effort, no switches); turning picks nothing.
   await m.tab('codex').click()
   await expect(m.tab('codex')).toHaveAttribute('aria-selected', 'true')
   await expect(m.page('claude')).toBeHidden()
   await expect(m.shown).toHaveAttribute('data-agent', 'codex')
-  await expect(m.shown.locator('.effort, [role=switch]')).toHaveCount(0)
+  if (cfg.codex?.models.length) await expect(m.shown.locator('.effort-select')).toHaveCount(1)
+  await expect(m.shown.getByRole('switch')).toHaveCount(0)
   await expect(m.chip).toHaveText(before!)
-  // A mouse click keeps the switch under the pointer (the panel keeps its
-  // height) until the pointer leaves it; then the page takes its own.
+  // No shift: the switch stays put and the panel keeps its height, at
+  // once and a second later, with the pointer moved away too.
   expect(Math.round((await m.tab('codex').boundingBox())!.y)).toBe(Math.round(tabsAt.y))
   await page.mouse.move(tabsAt.x + tabsAt.width / 2, tabsAt.y + 200)
-  await expect.poll(() => m.panel.evaluate((el) => el.style.height)).toBe('')
+  await page.waitForTimeout(1000)
+  expect(Math.round((await m.panel.boundingBox())!.height)).toBe(Math.round(heightAt))
   await fitsItsPage(m.panel)
   if (cfg.codex?.models.length) {
+    // The newest of each family first, the rest behind More models.
+    const more = m.shown.getByRole('button', { name: /^More models/ })
+    if (await more.count()) await more.click()
     await expect(m.shown.locator('[role=option]')).toHaveCount(cfg.codex.models.length + 1)
     await expect(m.shown.locator('[role=option][aria-selected=true]')).toHaveCount(0)
     await expect(m.shown).not.toContainText('Opens a new') // a pick switches this session, in place
@@ -552,9 +578,10 @@ test('the model menu turns between Claude and Codex', async ({ page }, info) => 
     await expect(m.shown.locator('.picker-off')).toBeVisible()
   }
   await page.screenshot({ path: `test-results/model-menu-${info.project.name}-codex.png` })
-  // Scrolled to the end (a phone's panel scrolls): the switch stays on top.
+  // Scrolled to the end (a phone's panel scrolls): the switch stays on top
+  // (under the grab bar and the sheet's header on a phone).
   await m.panel.evaluate((el) => (el.scrollTop = el.scrollHeight))
-  expect((await m.tab('codex').boundingBox())!.y - (await m.panel.boundingBox())!.y).toBeLessThan(16)
+  expect((await m.tab('codex').boundingBox())!.y - (await m.panel.boundingBox())!.y).toBeLessThan(info.project.name === 'desktop' ? 16 : 80)
   await page.keyboard.press('Escape')
   await expect(m.panel).toHaveCount(0)
   // Reopened: back on the session's own page.
@@ -581,9 +608,15 @@ test('the model menu turns between Claude and Codex', async ({ page }, info) => 
   await expect(m.panel).toHaveCount(0)
   await expect(m.chip).toBeFocused()
   await expect(m.chip).toHaveText(before!)
-  // A tap outside closes it.
+  // A tap outside closes it (on a phone, on the dimmed page over it).
   await m.chip.click()
-  await page.locator('.composer textarea').click()
+  // (The panel sits over the text field's left part, by its chip: the
+  // click goes to the field's right end, outside it.)
+  if (info.project.name === 'desktop') {
+    const field = (await page.locator('.composer textarea').boundingBox())!
+    await page.locator('.composer textarea').click({ position: { x: field.width - 24, y: field.height / 2 } })
+  }
+  else await page.locator('.menu-scrim').click({ position: { x: 20, y: 20 } })
   await expect(m.panel).toHaveCount(0)
   expect(sends).toEqual([])
 })
@@ -708,27 +741,106 @@ test('a session with history offers only its own agent', async ({ page }, info) 
   await expect(m.shown.locator('[role=option]', { hasText: /GPT/ })).toHaveCount(0)
   await expect(m.shown.locator('[role=option][aria-selected=true]')).toHaveCount(1)
   await expect(m.panel).not.toContainText('Opens a new')
-  // The settings: Effort without its pick in brackets (the Default pill
-  // says it), and every caption on one line at this width.
+  // The settings: Effort with its menu of steps, Chrome and Compact when
+  // idle, each a name and a one-line caption (no info buttons, no long
+  // tips), every caption on one line at this width.
   const effort = m.shown.locator('.picker-row.static').first()
   await expect(effort.locator('.row-label')).toHaveText('Effort')
-  for (const name of ['Ultracode', 'Chrome', 'Compact when idle']) {
-    const row = m.shown.getByRole('switch', { name, exact: true })
-    await expect(row).toBeVisible()
-    await expect(row).toHaveAttribute('title', /.{20,}/)
-  }
+  await m.shown.locator('.effort-select').click()
+  await expect(page.getByRole('menuitemradio')).toHaveText([/^Default/, 'Low', 'Medium', 'High', 'XHigh', 'Max'])
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('menu')).toHaveCount(0)
+  await expect(m.panel).toBeVisible() // that Escape closed only the effort menu
+  for (const name of ['Chrome', 'Compact when idle']) await expect(m.shown.getByRole('switch', { name, exact: true })).toBeVisible()
+  await expect(m.shown.getByRole('button', { name: /^About / })).toHaveCount(0)
   const captions = await m.shown.locator('.row-caption').evaluateAll((els) =>
     els.map((c) => ({ text: c.textContent, cut: c.scrollWidth > c.clientWidth + 1, lines: Math.round(c.getBoundingClientRect().height / parseFloat(getComputedStyle(c).lineHeight)) })),
   )
-  expect(captions.length).toBe(4)
+  expect(captions.length).toBe(3)
   for (const c of captions) expect(c, c.text!).toMatchObject({ cut: false, lines: 1 })
-  // The rows are one height, the switches in one column.
-  const rows = await m.shown.locator('.picker-row.static').evaluateAll((els) => els.map((r) => r.getBoundingClientRect().height))
+  // The switch rows are one height, the switches in one column.
+  const rows = await m.shown.locator('.picker-switch').evaluateAll((els) => els.map((r) => r.getBoundingClientRect().height))
   expect(Math.max(...rows) - Math.min(...rows)).toBeLessThan(3)
   const knobs = await m.shown.locator('.picker-switch .switch').evaluateAll((els) => els.map((k) => Math.round(k.getBoundingClientRect().right)))
   expect(new Set(knobs).size).toBe(1)
   await page.screenshot({ path: `test-results/model-menu-${info.project.name}-history.png` })
   await page.keyboard.press('Escape')
+  expect(sends).toEqual([])
+})
+
+// The model menu lies inside the screen: just above its own chip on a laptop,
+// on a phone a bottom sheet as wide as the screen over a dimmed page;
+// every row is reachable by scrolling it; on a phone every row, step, tab
+// and switch is at least 44 px tall, and the models' rows are a name and
+// a caption, not paragraphs of prices.
+test('the model menu fits the screen, with touch-sized rows on a phone', async ({ page }, info) => {
+  const sends = await noSends(page)
+  await page.addInitScript(() => localStorage.setItem('dakort.provider', 'claude'))
+  await openNew(page)
+  const m = menu(page)
+  await m.chip.click()
+  await expect(m.shown).toHaveAttribute('data-agent', 'claude')
+  await risen(m.panel)
+  const vp = page.viewportSize()!
+  const box = (await m.panel.boundingBox())!
+  const composer = (await page.locator('.composer-box').boundingBox())!
+  expect(box.x).toBeGreaterThanOrEqual(0)
+  expect(box.y).toBeGreaterThanOrEqual(0)
+  expect(box.x + box.width).toBeLessThanOrEqual(vp.width)
+  if (info.project.name === 'desktop') {
+    // By its own chip, not over the composer's top: 4 to 6 px above it,
+    // the two left edges in line, inside the box's width.
+    const chip = (await m.chip.boundingBox())!
+    expect(chip.y - (box.y + box.height)).toBeGreaterThanOrEqual(3.5)
+    expect(chip.y - (box.y + box.height)).toBeLessThanOrEqual(6.5)
+    expect(Math.abs(box.x - chip.x)).toBeLessThan(1)
+    expect(box.x).toBeGreaterThanOrEqual(composer.x)
+  }
+  else {
+    expect(box).toMatchObject({ x: 0, width: vp.width })
+    expect(Math.abs(box.y + box.height - vp.height)).toBeLessThan(1)
+    await expect(page.locator('.menu-scrim')).toBeVisible()
+    // Its header names it and has a close button.
+    await expect(m.panel.locator('.menu-grab .bar b')).toHaveText('Model and settings')
+    await expect(m.panel.getByRole('button', { name: 'Close' })).toBeVisible()
+  }
+  // Scrolled to its end, the last row is inside the panel.
+  await m.panel.evaluate((el) => (el.scrollTop = el.scrollHeight))
+  const last = (await m.shown.locator('.picker-row').last().boundingBox())!
+  expect(last.y + last.height).toBeLessThanOrEqual(box.y + box.height)
+  await m.panel.evaluate((el) => (el.scrollTop = 0))
+  // A model row: one line of caption, whatever the width.
+  const caps = await m.shown.locator('.opt-desc').evaluateAll((els) => els.map((c) => Math.round(c.getBoundingClientRect().height / parseFloat(getComputedStyle(c).lineHeight))))
+  for (const n of caps) expect(n).toBe(1)
+  if (info.project.name === 'desktop') return expect(sends).toEqual([])
+  const small = await m.panel.evaluate((el) =>
+    [...el.querySelectorAll<HTMLElement>('.picker-page.on .picker-row, .picker-page.on [data-item], [role=tab]')]
+      .map((e) => ({ what: e.getAttribute('aria-label') || e.textContent?.slice(0, 30), w: e.getBoundingClientRect().width, h: e.getBoundingClientRect().height }))
+      .filter((r) => r.w < 44 || r.h < 44),
+  )
+  expect(small).toEqual([])
+  // The step in use (Effort's, the agent switch's) fills only the shape
+  // inside its 44 px target: the control's outline is drawn 4 px in, and
+  // the wash once overflowed it by those 4 px above and below.
+  const fills = await m.panel.evaluate((el) =>
+    [...el.querySelectorAll<HTMLElement>('.effort button.on, .picker-tab.on')].map((b) => {
+      const s = getComputedStyle(b)
+      const track = b.parentElement!
+      const o = getComputedStyle(track, '::before')
+      return { clip: s.backgroundClip, fill: b.getBoundingClientRect().height - parseFloat(s.borderTopWidth) - parseFloat(s.borderBottomWidth), outline: track.getBoundingClientRect().height - parseFloat(o.top) - parseFloat(o.bottom) }
+    }),
+  )
+  expect(fills.length).toBeGreaterThan(0)
+  for (const f of fills) {
+    expect(f.clip).toBe('padding-box')
+    expect(Math.abs(f.fill - f.outline)).toBeLessThanOrEqual(1)
+  }
+  // The header's close: 44 px, and it closes the sheet.
+  const close = m.panel.getByRole('button', { name: 'Close' })
+  const cb = (await close.boundingBox())!
+  expect(Math.min(cb.width, cb.height)).toBeGreaterThanOrEqual(44)
+  await close.click()
+  await expect(m.panel).toHaveCount(0)
   expect(sends).toEqual([])
 })
 
@@ -763,8 +875,8 @@ test('a Codex model in an empty session switches it to Codex', async ({ page }) 
   await expect(m.chip).toContainText(target.label)
   await expect(m.shown).toHaveAttribute('data-agent', 'codex')
   await expect(m.shown.locator('[role=option][aria-selected=true]')).toContainText(target.label)
-  await expect(m.shown.locator('.effort')).toHaveCount(1)
-  await expect(m.shown.getByRole('switch')).toHaveCount(0) // Ultracode and Chrome are Claude's
+  await expect(m.shown.locator('.effort-select')).toHaveCount(1)
+  await expect(m.shown.getByRole('switch')).toHaveCount(0) // Chrome is Claude's
   await expect(page.locator('.composer textarea')).toHaveAttribute('placeholder', 'Start a new session in this project')
   await page.keyboard.press('Escape')
   await m.chip.click()
@@ -773,7 +885,7 @@ test('a Codex model in an empty session switches it to Codex', async ({ page }) 
   await m.shown.locator('[role=option]').nth(1).click()
   await expect(m.chip.locator('.agent-icon.claude')).toHaveCount(1)
   await expect(page.locator('.tab.active .agent-icon.claude')).toHaveCount(1)
-  await expect(m.shown.getByRole('switch', { name: 'Ultracode' })).toBeVisible()
+  await expect(m.shown.getByRole('switch', { name: 'Chrome' })).toBeVisible()
   await page.keyboard.press('Escape')
   expect(sends).toEqual([])
 })
@@ -782,7 +894,7 @@ test('a Codex model in an empty session switches it to Codex', async ({ page }) 
 // its words carrying no "/login") offers the sign-in under it, after a
 // reload too, and once only; the turn's bare reason ("api_error") adds no
 // second box. The rows are added to the page's tail here, and Sign in is
-// not pressed, so no login runs.
+// answered here, so no login runs.
 test('a lapsed login offers the sign-in, once, after a reload', async ({ page }) => {
   const s = await openSession(page, quiet)
   const play = (ev: object) => page.evaluate((ev) => (window as any).dakort.stream.onEvent(ev), ev)
@@ -811,6 +923,14 @@ test('a lapsed login offers the sign-in, once, after a reload', async ({ page })
   await play({ type: 'turn', session: s.id, state: 'done', result: { ok: false, reason: 'api_error' } })
   await expect(t.locator('.signin')).toHaveCount(1)
   await expect(t.getByText('api_error', { exact: true })).toHaveCount(0)
+  // A sign-in that cannot start (answered here, so nothing runs) says so
+  // in the app's words, with the server's reason under it.
+  await page.route('**/api/signin**', (r) => r.fulfill({ status: 500, contentType: 'text/plain', body: 'madetest: cannot start' }))
+  const card = t.locator('.signin')
+  await card.getByRole('button', { name: 'Sign in' }).click()
+  await expect(card.getByRole('alert')).toContainText('Could not start the sign-in.')
+  await expect(card.getByRole('alert')).toContainText('madetest: cannot start.')
+  await expect(card.getByRole('button', { name: 'Try again' })).toBeVisible()
   await page.unroute(tail)
 })
 
@@ -853,31 +973,49 @@ test('a process a turn left running shows with a Stop', async ({ page }, info) =
   await expect(row).toContainText('node.exe')
   await expect(row).toContainText('1h')
   await page.screenshot({ path: `test-results/leftovers-${info.project.name}.png` })
-  await row.getByRole('button', { name: 'Stop' }).click()
+  await row.getByRole('button', { name: 'Stop', exact: true }).click()
   await expect.poll(() => stops).toBe(1)
   await play({ type: 'leftovers', session: s.id })
   await expect(row).toHaveCount(0)
   await page.unroute(`**/api/sessions/${s.id}/leftovers/4242/stop`)
 })
 
-// On a phone the context meter sits in the box's corner; the number is
-// hidden there (bar only), so the first line of a message does not run
-// under it. On a desktop the row has room for both.
-test('the context meter leaves room for the first line on a phone', async ({ page }, info) => {
-  await openSession(page, (l) => l.filter((x) => x.provider !== 'codex' && !x.heldBy && x.size > 100_000).sort((a, b) => a.size - b.size)[0])
-  const ctx = page.locator('.composer .ctx')
+// The context meter sits in the composer's row of controls, under the
+// text, never over it: a laptop shows the tokens, a phone the share of the
+// window (the tokens are in its tip). It once hung in the box's top corner
+// on a phone, a bar with no number, over the first line of a message.
+test('the context meter sits in the row of controls, under the text', async ({ page }, info) => {
+  // A session whose last reply says its context size: not every one does
+  // (a session that ended on an error, or an old CLI's), so try a few.
+  const ctx = page.locator('.composer .meter .ctx')
+  let found = false
+  for (let i = 0; i < 4 && !found; i++) {
+    await openSession(page, (l) => l.filter((x) => x.provider !== 'codex' && !x.heldBy && x.size > 100_000).sort((a, b) => a.size - b.size)[i] ?? l[0])
+    found = await ctx.waitFor({ state: 'attached', timeout: 3000 }).then(() => true, () => false)
+  }
+  test.skip(!found, 'no session here has a context size')
+  // A long model name on a phone: the meter steps aside (useTightRow's
+  // step 3) so the name is whole; that is the row working.
+  if (await page.locator('.composer-row[data-nometer]').count()) {
+    await expect(ctx).toBeHidden()
+    const cut = await page.locator('.composer .model-menu .chip-btn').evaluate((el) => {
+      const r = document.createRange()
+      r.selectNodeContents(el)
+      const cs = getComputedStyle(el)
+      return r.getBoundingClientRect().width > el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) + 0.5
+    })
+    expect(cut, 'the model chip is cut although the meter stepped aside').toBe(false)
+    return
+  }
   await expect(ctx).toBeVisible()
   const num = ctx.locator('.ctx-num')
-  if (info.project.name === 'desktop') {
-    await expect(num).toBeVisible()
-  } else {
-    await expect(num).toBeHidden()
-    const meter = (await ctx.boundingBox())!
-    const box = (await page.locator('.composer-box textarea').boundingBox())!
-    const pad = await page.locator('.composer-box textarea').evaluate((el) => parseFloat(getComputedStyle(el).paddingRight))
-    expect(meter.width).toBeLessThanOrEqual(pad)
-    expect(meter.x).toBeGreaterThanOrEqual(box.x + box.width - pad - 1)
-  }
+  if (info.project.name === 'desktop') await expect(num).toBeVisible()
+  else if (await ctx.locator('.ctx-pct').count()) await expect(num).toBeHidden()
+  const meter = (await page.locator('.composer .meter').boundingBox())!
+  const box = (await page.locator('.composer-box textarea').boundingBox())!
+  expect(meter.y).toBeGreaterThanOrEqual(box.y + box.height - 1)
+  await expect(page.locator('.composer .meter')).toHaveAttribute('data-tip', /^\S+ (of \S+ )?tokens/) // one short line
+  await expect(page.locator('.composer .meter')).toHaveAttribute('aria-label', /Context: \S+ (of \S+ )?tokens/)
 })
 
 // More than two fold into one line with Show and Stop all, and the opened
@@ -933,10 +1071,13 @@ test('a message sent during a turn is queued, and comes back on a stop', async (
 
   await play({ type: 'turn', session: s.id, state: 'running' })
   const box = page.locator('.composer textarea')
-  await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Queue' })).toHaveCount(0)
+  // One button at the row's end (Claude desktop's): Stop while the box is
+  // empty, Queue in its place once there is something to send.
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Queue', exact: true })).toHaveCount(0)
   await box.fill('madetest first')
-  await page.getByRole('button', { name: 'Queue' }).click()
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Queue', exact: true }).click()
   await expect.poll(() => bodies.length).toBe(1)
   expect(bodies[0]).toMatchObject({ text: 'madetest first', queue: true })
   await expect(box).toHaveValue('')
@@ -946,36 +1087,409 @@ test('a message sent during a turn is queued, and comes back on a stop', async (
   await page.screenshot({ path: `test-results/queue-${info.project.name}.png` })
 
   // Taken back to the box.
-  await page.locator('.queued-item').first().getByRole('button', { name: 'Take back to the box' }).click()
+  await page.locator('.queued-item').first().getByRole('button', { name: 'Edit', exact: true }).click()
   await expect(box).toHaveValue('madetest first')
   await play({ type: 'queue', session: s.id, queue: [{ promptId: 'p2', text: 'madetest second' }] })
   await expect(page.locator('.queued-item')).toHaveCount(1)
 
-  // A stop hands the rest back too.
-  await page.getByRole('button', { name: 'Stop' }).click()
+  // A stop hands the rest back too: with a draft in the box, Escape in it
+  // stops (the button there is Queue).
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0)
+  await box.press('Escape')
   await expect(box).toHaveValue('madetest first\n\nmadetest second')
   await play({ type: 'queue', session: s.id })
   await play({ type: 'turn', session: s.id, state: 'done' })
   await expect(page.locator('.queued-item')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeVisible()
   await box.fill('')
   for (const r of ['send', 'unqueue/*', 'interrupt']) await page.unroute(`**/api/sessions/*/${r}`)
 })
 
+// A running turn has one running mark, a muted working line at the end of
+// the reply, and no ring anywhere in the transcript; the reply's time and
+// Copy come once the turn has ended, never between its tools and that line.
+test('a running turn shows one quiet working line, and its time only once done', async ({ page }) => {
+  const s = await openSession(page, quiet)
+  const play = (ev: object) => page.evaluate((ev) => (window as any).dakort.stream.onEvent(ev), ev)
+  const t = page.locator('.transcript')
+  const lastReply = t.locator('.item-wrap').last()
+  await play({ type: 'turn', session: s.id, state: 'running' })
+  await expect(t.locator('.working')).toHaveCount(1)
+  await expect(t.locator('.working .shimmer')).toHaveText(/…$/)
+  await expect(t.locator('.ring')).toHaveCount(0)
+  const color = await t.locator('.working').evaluate((el) => getComputedStyle(el).color)
+  const accent = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--primary').trim())
+  expect(color).not.toBe(accent)
+  if (await lastReply.locator('.reply').count()) await expect(lastReply.locator('.reply-actions')).toHaveCount(0)
+  await play({ type: 'turn', session: s.id, state: 'done', result: { ok: true } })
+  await expect(t.locator('.working')).toHaveCount(0)
+  if (await lastReply.locator('.reply').count()) await expect(lastReply.locator('.reply-actions')).toHaveCount(1)
+})
+
 // Background tasks that outlive their turn (agents, commands) show as
-// work: a ring on the session's tab, not the turn's pulse, and the page
-// icon's working look, where both once read as idle while agents ran.
-test('background tasks after a turn still show as work', async ({ page }) => {
+// work: the session's tab in its tasks state (the agent's mark breathing,
+// no dot), not the turn's, and the page icon's working look, where both
+// once read as idle while agents ran. The task's chip opens a card that
+// says what it is, by hover or by a tap.
+test('background tasks after a turn still show as work', async ({ page }, info) => {
   const s = await openSession(page, (l) => l[0])
   const play = (ev: object) => page.evaluate((ev) => (window as any).dakort.stream.onEvent(ev), ev)
   const icon = page.locator('link[rel="icon"]')
   const tab = page.locator(`.tabs .tab[data-tab="${s.id}"]`)
-  await expect(tab.locator('.dot.tasks')).toHaveCount(0)
-  await play({ type: 'tasks', session: s.id, tasks: [{ id: 'k1', type: 'local_agent', description: 'Research' }] })
-  await expect(tab.locator('.dot.tasks')).toHaveCount(1)
-  await expect(tab.locator('.dot.run')).toHaveCount(0)
+  await expect(tab).not.toHaveAttribute('data-state', 'tasks')
+  const started = new Date(Date.now() - 125_000).toISOString()
+  await play({ type: 'tasks', session: s.id, tasks: [{ id: 'k1', type: 'local_agent', description: 'Research', started, subagent: 'Explore', model: 'sonnet', steps: 3, last: 'Reading the docs' }] })
+  await expect(tab).toHaveAttribute('data-state', 'tasks')
+  // The tab in use shows its ×, not the tasks ring (a tab not in use shows
+  // the ring in the ×'s slot, the tab check in shell.spec covers that).
+  await expect(tab.locator('.dot')).toBeHidden()
   await expect(icon).toHaveAttribute('data-state', 'run')
+  const chip = page.locator('.composer .task-label', { hasText: 'Research' })
+  if (info.project.name === 'desktop') await chip.hover()
+  else await chip.click()
+  const card = page.locator('.task-card')
+  await expect(card).toBeVisible()
+  await expect(card).toContainText('Background agent')
+  await expect(card).toContainText('Sonnet')
+  await expect(card).toContainText(/running 2m \d+s/)
+  await expect(card).toContainText('3 steps')
+  await expect(card).toContainText('Reading the docs')
+  await page.keyboard.press('Escape')
   await play({ type: 'tasks', session: s.id, tasks: [] })
-  await expect(tab.locator('.dot.tasks')).toHaveCount(0)
+  await expect(tab).not.toHaveAttribute('data-state', 'tasks')
   await expect(icon).toHaveAttribute('data-state', 'idle')
+})
+
+// The composer's controls are one row of whole parts: none overlaps
+// another or leaves the box, and on a phone each is a 44 px target (they
+// once floated as unrelated pills of 22 to 32 px, a lone clock among them).
+test('the composer is one row of whole, separate controls', async ({ page }, info) => {
+  await openSession(page, quiet)
+  const box = (await page.locator('.composer-box').boundingBox())!
+  const vw = page.viewportSize()!.width
+  expect(box.x).toBeGreaterThanOrEqual(0)
+  expect(box.x + box.width).toBeLessThanOrEqual(vw)
+  const parts = await page.locator('.composer-row').evaluate((row) =>
+    [...row.querySelectorAll<HTMLElement>(':scope > button, :scope > .picker > button, :scope > .mode-chip, :scope > .composer-end > :is(button, .held-note)')]
+      .filter((e) => e.offsetParent)
+      .map((e) => {
+        const r = e.getBoundingClientRect()
+        return { name: e.getAttribute('aria-label') || e.className, x: r.x, y: r.y, w: r.width, h: r.height, cut: e.scrollWidth > e.clientWidth + 1 }
+      }),
+  )
+  expect(parts.length).toBeGreaterThanOrEqual(4) // attach, model, mode, send at least
+  const min = info.project.name === 'desktop' ? 28 : 44
+  for (const p of parts) {
+    expect(p.h, p.name).toBeGreaterThanOrEqual(min)
+    expect(p.w, p.name).toBeGreaterThanOrEqual(min)
+    expect(p.x, p.name).toBeGreaterThanOrEqual(box.x)
+    expect(p.x + p.w, p.name).toBeLessThanOrEqual(box.x + box.width + 0.5)
+    expect(p.cut, p.name + ' cut off').toBe(false)
+  }
+  for (let i = 0; i < parts.length; i++)
+    for (let j = i + 1; j < parts.length; j++) {
+      const a = parts[i], b = parts[j]
+      const apart = a.x + a.w <= b.x + 0.5 || b.x + b.w <= a.x + 0.5 || a.y + a.h <= b.y + 0.5 || b.y + b.h <= a.y + 0.5
+      expect(apart, `${a.name} overlaps ${b.name}`).toBe(true)
+    }
+})
+
+// A control's tip (tips.ts) shows on a long press on a phone and on a
+// hover with a mouse, and lies inside the screen even for the control at
+// the right edge, the send button.
+test('tooltips show on touch and stay inside the screen', async ({ page }, info) => {
+  await openSession(page, quiet)
+  const vp = page.viewportSize()!
+  for (const sel of ['.composer .cbtn.attach', '.composer .send']) {
+    const el = page.locator(sel).first()
+    await el.scrollIntoViewIfNeeded()
+    const r = (await el.boundingBox())!
+    if (info.project.name === 'desktop') await el.hover()
+    else await el.dispatchEvent('pointerdown', { pointerType: 'touch', isPrimary: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 })
+    const tip = page.locator('.tip[data-open]')
+    await expect(tip).toBeVisible()
+    const t = (await tip.boundingBox())!
+    expect(t.x).toBeGreaterThanOrEqual(0)
+    expect(t.y).toBeGreaterThanOrEqual(0)
+    expect(t.x + t.width).toBeLessThanOrEqual(vp.width)
+    expect(t.y + t.height).toBeLessThanOrEqual(vp.height)
+    // Close to its button (shadcn's Tooltip distance), in a word or three.
+    const gap = t.y + t.height <= r.y ? r.y - (t.y + t.height) : t.y - (r.y + r.height)
+    expect(gap, sel + ' tip distance').toBeGreaterThanOrEqual(4)
+    expect(gap, sel + ' tip distance').toBeLessThanOrEqual(8)
+    expect(((await tip.textContent()) ?? '').trim().split(/\s+/).length, sel + ' tip words').toBeLessThanOrEqual(3)
+    if (info.project.name !== 'desktop') await el.dispatchEvent('pointerup', { pointerType: 'touch' })
+    await page.keyboard.press('Escape')
+    await page.mouse.move(0, 0)
+    await expect(tip).toHaveCount(0)
+  }
+})
+
+// Tips are for icon-only buttons: a row or a tab that shows its name (a
+// project, a session's tab, a file) gets none (review of 2026-11-24).
+test('rows and tabs that show their name have no tooltip', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'hover is a mouse thing')
+  await openSession(page, quiet)
+  const tip = page.locator('.tip[data-open]')
+  for (const sel of ['.tab.active', '.folder-list .folder-row', '.explorer-panel .tree-row']) {
+    await page.locator(sel).first().hover()
+    await page.waitForTimeout(900)
+    await expect(tip, sel).toHaveCount(0)
+  }
+  // An icon button beside them still has its short tip.
+  await page.getByRole('button', { name: 'New session' }).first().hover()
+  await expect(tip).toHaveText('New session')
+})
+
+// Scrolling up through a long session: nothing but the scroll moves what
+// is on screen. A synthetic history of 600 rows (prompts, replies of
+// several lengths, tool calls whose results land rows later, so an item
+// can span the window's edge) is served with older pages 300 ms late, and
+// the view is scrolled up in steps and then in a fling while those pages
+// arrive. A row on screen is followed throughout: its position may change
+// only by what each scroll moved, never between scrolls (older rows
+// landing, an item growing above it, the bottom-follow firing).
+test('scrolling up through a long session never jumps', async ({ page }) => {
+  test.setTimeout(120_000)
+  const s = await openSession(page, quiet)
+  const N = 600
+  const at = (i: number) => new Date(Date.now() - (N - i) * 60_000).toISOString()
+  const rows: object[] = []
+  for (let i = 0; rows.length < N; i++) {
+    const base = () => ({ offset: rows.length * 100, end: rows.length * 100 + 100, time: at(rows.length) })
+    rows.push({ ...base(), uuid: `madetest-p${i}`, role: 'user', blocks: [{ type: 'text', text: `madetest question ${i}` + ' and more'.repeat(i % 7) }] })
+    if (i % 3 === 0) {
+      rows.push({ ...base(), uuid: `madetest-u${i}`, role: 'assistant', blocks: [{ type: 'text', text: 'Looking.' }, { type: 'tool_use', id: `madetest-t${i}`, name: 'Bash', input: { command: 'ls' } }] })
+      rows.push({ ...base(), uuid: `madetest-r${i}`, role: 'user', blocks: [{ type: 'tool_result', id: `madetest-t${i}`, text: 'a\nb' }] })
+    }
+    rows.push({ ...base(), uuid: `madetest-a${i}`, role: 'assistant', blocks: [{ type: 'text', text: Array.from({ length: 1 + (i % 5) }, (_, k) => `Paragraph ${k} of answer ${i}. ` + 'Words to wrap. '.repeat(8 + ((i * 7 + k) % 20))).join('\n\n') }] })
+  }
+  const end = rows.length * 100
+  await page.route(new RegExp(`/api/sessions/${s.id}/rows`), async (route) => {
+    const u = new URL(route.request().url())
+    if (u.searchParams.has('after')) return route.fulfill({ json: { rows: [], next: end } })
+    const before = Number(u.searchParams.get('before') ?? end)
+    const older = rows.filter((r) => (r as { offset: number }).offset < before)
+    const got = older.slice(-Number(u.searchParams.get('n') ?? 50))
+    if (u.searchParams.has('before')) await new Promise((r) => setTimeout(r, 300))
+    return route.fulfill({ json: { rows: got, atStart: got.length === older.length, next: end } })
+  })
+  await page.reload()
+  await page.locator('.transcript [data-anchor]').last().waitFor()
+  await page.waitForTimeout(500)
+
+  // In the page: follow the row nearest the middle of the view by its
+  // anchor (re-found each time, as an item may be remounted) and its
+  // bottom edge (an item can grow at its top). drift adds up every move
+  // that no scroll made.
+  await page.evaluate(() => {
+    const box = document.querySelector<HTMLElement>('.transcript')!
+    const w = window as any
+    const pick = () => {
+      const r = box.getBoundingClientRect()
+      const el = [...box.querySelectorAll<HTMLElement>('[data-anchor]')].find((e) => e.getBoundingClientRect().bottom > r.top + r.height / 2)
+      return el?.dataset.anchor ?? ''
+    }
+    const bottom = (key: string) => box.querySelector<HTMLElement>(`[data-anchor="${CSS.escape(key)}"]`)?.getBoundingClientRect().bottom
+    w.jump = { key: pick(), last: 0, drift: [] as string[], moved: 0 }
+    w.jump.last = bottom(w.jump.key)
+    // check: what moved since the last look, with no scroll in between.
+    w.jumpCheck = (why: string) => {
+      const j = w.jump
+      const b = bottom(j.key)
+      if (b === undefined) {
+        j.key = pick()
+        j.last = bottom(j.key)
+        return
+      }
+      if (Math.abs(b - j.last) > 1) j.drift.push(`${why}: ${j.key} moved ${Math.round(b - j.last)} px with no scroll`)
+      j.last = b
+      // Far off screen: follow a row in view again.
+      const r = box.getBoundingClientRect()
+      if (b < r.top - r.height || b > r.bottom + r.height) {
+        j.key = pick()
+        j.last = bottom(j.key)
+      }
+    }
+    // scroll: one step up, checked before (nothing moved since) and that
+    // the row moved by exactly what scrollTop did.
+    w.jumpScroll = (dy: number) => {
+      const j = w.jump
+      w.jumpCheck('between scrolls')
+      const top = box.scrollTop
+      box.scrollBy(0, -dy)
+      const moved = top - box.scrollTop
+      const b = bottom(j.key)!
+      if (Math.abs(b - j.last - moved) > 1) j.drift.push(`scroll ${dy}: ${j.key} moved ${Math.round(b - j.last)} px, the scroll ${moved}`)
+      j.last = b
+      j.moved += moved
+    }
+  })
+  const box = page.locator('.transcript')
+  // Steps of most of a screen, some 220 ms apart (an older page asked for
+  // at 150 ms of rest is still on its way when the next step comes), some
+  // with time for the page to land in between.
+  for (let i = 0; i < 16; i++) {
+    await page.evaluate(() => (window as any).jumpScroll(450))
+    await page.waitForTimeout(220)
+    await page.evaluate(() => (window as any).jumpCheck('after a step'))
+    if (i % 2) {
+      await page.waitForTimeout(400)
+      await page.evaluate(() => (window as any).jumpCheck('after older rows'))
+    }
+  }
+  // Flings: a step every frame, slowing down, with short rests between,
+  // so pages land mid-fling and right at the top of what is loaded.
+  for (let f = 0; f < 4; f++) {
+    await page.evaluate(
+      () =>
+        new Promise<void>((done) => {
+          let n = 0
+          const frame = () => {
+            ;(window as any).jumpScroll(Math.max(10, 160 - n * 4))
+            if (++n < 40) requestAnimationFrame(frame)
+            else done()
+          }
+          requestAnimationFrame(frame)
+        }),
+    )
+    await page.waitForTimeout(200)
+    await page.evaluate(() => (window as any).jumpCheck('between flings'))
+  }
+  for (let i = 0; i < 6; i++) {
+    await page.waitForTimeout(250)
+    await page.evaluate(() => (window as any).jumpCheck('after the fling'))
+  }
+  const j = await page.evaluate(() => (window as any).jump)
+  expect(j.moved, 'the checks scrolled').toBeGreaterThan(3000)
+  expect(await box.evaluate((el) => el.querySelectorAll('[data-anchor^="madetest-"]').length), 'older rows loaded').toBeGreaterThan(60)
+  expect(j.drift).toEqual([])
+})
+
+// A turn cut off by Interrupted says when, muted beside the word (it has
+// no Copy line to carry a time), and a background task's news, a message
+// that starts a turn, is a bubble on the right like a prompt, marked as
+// the system's. The rows are added to the page's tail; nothing is sent.
+test('an interrupt has its time and task news is a message', async ({ page }) => {
+  const s = await openSession(page, quiet)
+  const tail = new RegExp(`/api/sessions/${s.id}/rows(\\?(?!.*after=).*)?$`)
+  await page.route(tail, async (route) => {
+    const res = await route.fetch()
+    const page_ = await res.json()
+    const end = page_.rows.at(-1)?.end ?? 0
+    const base = { offset: end, end, time: new Date().toISOString() }
+    const text = (t: string) => ({ type: 'text', text: t })
+    page_.rows.push(
+      { ...base, uuid: 'madetest-p', role: 'user', blocks: [text('madetest prompt')] },
+      { ...base, uuid: 'madetest-a', role: 'assistant', blocks: [{ type: 'tool_use', id: 'madetest-1', name: 'Bash', input: { command: 'sleep 60' } }] },
+      { ...base, uuid: 'madetest-r', role: 'user', blocks: [{ type: 'tool_result', id: 'madetest-1', text: '', isError: true }] },
+      { ...base, uuid: 'madetest-i', role: 'user', blocks: [text('[Request interrupted by user]')] },
+      { ...base, uuid: 'madetest-n', role: 'user', blocks: [text('<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command "madetest restart" completed (exit code 0)</summary>\n</task-notification>')] },
+      { ...base, uuid: 'madetest-b', role: 'assistant', blocks: [text('madetest answer')] },
+    )
+    return route.fulfill({ json: page_ })
+  })
+  await page.reload()
+  const t = page.locator('.transcript')
+  const stop = t.locator('.notice.info', { hasText: 'Interrupted' }).last()
+  await expect(stop.locator('.reply-time')).toHaveText(/\d:\d\d/)
+  await expect(stop.locator('.copy-btn')).toHaveCount(0)
+  const msg = t.locator('.task-msg').last()
+  await expect(msg).toContainText('Background task finished')
+  await expect(msg).toContainText('madetest restart')
+  await expect(msg).toContainText('exit code 0')
+  await expect(msg).not.toContainText('Background command')
+  // On the right, as a prompt is.
+  const col = (await t.locator('.reply').last().boundingBox())!
+  const box = (await msg.boundingBox())!
+  expect(Math.abs(box.x + box.width - (col.x + col.width))).toBeLessThanOrEqual(2)
+  expect(box.width).toBeLessThan(col.width * 0.9)
+})
+
+// The conversation's parts at full size on a phone: a run of tool calls is
+// one 44 px line that opens to 44 px rows, an edit opens to a diff with
+// its signs, a code block's Copy sits in a header strip above the code,
+// and an approval's Deny and Allow are 44 px tall inside the column, the
+// waiting line saying it needs you. The rows are added to the page's tail
+// and the turn and approval played in; nothing is sent or answered.
+test('tool runs, diffs, code blocks and approvals are full size', async ({ page }, info) => {
+  const s = await openSession(page, quiet)
+  const play = (ev: object) => page.evaluate((ev) => (window as any).dakort.stream.onEvent(ev), ev)
+  const tail = new RegExp(`/api/sessions/${s.id}/rows(\\?(?!.*after=).*)?$`)
+  await page.route(tail, async (route) => {
+    const res = await route.fetch()
+    const page_ = await res.json()
+    const end = page_.rows.at(-1)?.end ?? 0
+    const base = { offset: end, end, time: new Date().toISOString() }
+    const use = (id: string, name: string, input: object) => ({ type: 'tool_use', id, name, input })
+    const result = (id: string, text: string, isError = false) => ({ type: 'tool_result', id, text, isError })
+    page_.rows.push(
+      { ...base, uuid: 'madetest-p', role: 'user', blocks: [{ type: 'text', text: 'madetest prompt' }] },
+      {
+        ...base,
+        uuid: 'madetest-a',
+        role: 'assistant',
+        blocks: [
+          use('madetest-1', 'Read', { file_path: '/madetest/src/a.ts' }),
+          use('madetest-2', 'Edit', { file_path: '/madetest/src/a.ts', old_string: 'one\ntwo', new_string: 'one\nTWO\nthree' }),
+          use('madetest-3', 'Bash', { command: 'npm run lint', description: 'Lint' }),
+          use('madetest-4', 'Bash', { command: 'cd /madetest && go test ./...' }),
+        ],
+      },
+      { ...base, uuid: 'madetest-r', role: 'user', blocks: [result('madetest-1', '1\tone\n2\ttwo'), result('madetest-2', 'ok'), result('madetest-3', 'error: x', true), result('madetest-4', 'ok')] },
+      { ...base, uuid: 'madetest-t', role: 'assistant', blocks: [{ type: 'text', text: 'Done.\n\n```ts\nconst a: number = 1 // ' + 'long '.repeat(40) + '\n```' }] },
+    )
+    return route.fulfill({ json: page_ })
+  })
+  await page.reload()
+  const t = page.locator('.transcript')
+  const run = t.locator('.run-line').last()
+  // The group's line is the plain summary: no counts, no "1 failed" (its
+  // red dot says so).
+  await expect(run).toHaveText(/^\s*Read 1 file · edited 1 file · ran 2 commands\s*$/)
+  await expect(run.locator('.dot.failed')).toHaveCount(1)
+  const phone = info.project.name !== 'desktop'
+  const tall = async (l: Locator) => (await l.boundingBox())!.height
+  if (phone) expect(await tall(run)).toBeGreaterThanOrEqual(44)
+  await run.click()
+  // Closed, a command's row is words only: its description, else words
+  // made from the command; the command shows once the row is open.
+  const lint = t.locator('.tool-line', { hasText: 'Lint' }).last()
+  await expect(lint).not.toContainText('npm run lint')
+  await expect(lint).toContainText('Failed')
+  const tests = t.locator('.tool-line', { hasText: 'Run Go tests' }).last()
+  await expect(tests).not.toContainText('go test')
+  await tests.click()
+  await expect(t.locator('.tool-body').last()).toContainText('go test ./...')
+  await tests.click()
+  const edit = t.locator('.tool-line', { hasText: 'a.ts' }).nth(1)
+  if (phone) expect(await tall(edit)).toBeGreaterThanOrEqual(44)
+  await edit.click()
+  const diff = t.locator('.diff-card')
+  await expect(diff.locator('.diff-line.add')).toHaveCount(2)
+  await expect(diff.locator('.diff-line.del .diff-sign')).toHaveText('−')
+  // Copy is in the header, above the code, not over its first line (its
+  // touch target may reach into the pre's padding, not into the text).
+  const block = t.locator('.code-block').last()
+  const copy = (await block.locator('.code-copy').boundingBox())!
+  const code = (await block.locator('pre code').boundingBox())!
+  expect(copy.y + copy.height).toBeLessThanOrEqual(code.y + 1)
+  if (phone) expect(copy.height).toBeGreaterThanOrEqual(44)
+  await expect(block.locator('.code-lang')).toHaveText('ts')
+  // An approval: the line says it waits, the card sits in the column.
+  await play({ type: 'turn', session: s.id, state: 'running' })
+  await play({ type: 'permission', session: s.id, permission: { id: 'madetest-perm', tool: 'Bash', input: { command: 'madetest' } } })
+  await expect(t.locator('.working.needs-you')).toContainText('Waiting for you')
+  const card = page.locator('.perm-card')
+  await expect(card.locator('.term-cmd')).toContainText('madetest')
+  for (const name of ['Deny…', 'Allow']) {
+    const b = (await card.getByRole('button', { name }).boundingBox())!
+    expect(b.height).toBeGreaterThanOrEqual(phone ? 44 : 32)
+  }
+  const col = (await card.boundingBox())!
+  expect(col.width).toBeLessThanOrEqual(800 + 1)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
+  await play({ type: 'permissionDone', session: s.id, requestId: 'madetest-perm' })
+  await play({ type: 'turn', session: s.id, state: 'done' })
+  await page.unroute(tail)
 })

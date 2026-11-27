@@ -9,8 +9,8 @@ const byName: Record<string, string> = {
   'go.mod': 'go-mod',
   'go.sum': 'go-mod',
   'go.work': 'go-mod',
-  'package.json': 'npm',
-  'package-lock.json': 'npm',
+  'package.json': 'json', /* a file type's mark, not the solid red npm square that read as an error */
+  'package-lock.json': 'json',
   dockerfile: 'docker',
   'docker-compose.yml': 'docker',
   'docker-compose.yaml': 'docker',
@@ -21,8 +21,8 @@ const byName: Record<string, string> = {
   license: 'license',
   'license.md': 'license',
   'license.txt': 'license',
-  'readme.md': 'readme',
-  readme: 'readme',
+  'readme.md': 'markdown', /* a Markdown file's mark (the solid info disc read as a status) */
+  readme: 'markdown',
   '.env': 'settings',
 }
 
@@ -144,13 +144,13 @@ const byExt: Record<string, string> = {
 export const GENERIC = 'file'
 
 // Every icon the app can ask for, for the build to extract.
-export const FILE_ICON_NAMES = [...new Set([...Object.values(byName), ...Object.values(byExt), 'readme', 'license', 'docker', 'settings', 'vite', 'document'])]
+export const FILE_ICON_NAMES = [...new Set([...Object.values(byName), ...Object.values(byExt), 'license', 'docker', 'settings', 'vite', 'document'])]
 
 // fileIconName picks the icon for a path or file name.
 export function fileIconName(path: string): string {
   const name = (path.split(/[\\/]/).pop() ?? path).toLowerCase()
   if (byName[name]) return byName[name]
-  if (/^readme\b/.test(name)) return 'readme'
+  if (/^readme\b/.test(name)) return 'markdown'
   if (/^license\b/.test(name)) return 'license'
   if (/^dockerfile\b/.test(name)) return 'docker'
   if (/^\.env\b/.test(name)) return 'settings'

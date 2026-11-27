@@ -1,0 +1,182 @@
+/* The Excel view's own styles (SheetView.tsx), loaded with it. Its footer
+   rules are scoped to .file-sheet: .sheet-foot is also the bottom sheets'
+   footer (styles.css). */
+/* An Excel sheet: white with black text whatever the theme, as the Word
+   view is, since the file's own colours were chosen against white. */
+.file-sheet {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.sheet-box {
+  flex: 1;
+  overflow: auto;
+  background: var(--raised);
+}
+/* The grid with a gutter on every side, all of it inside the scrolled
+   area: the frame shows at either end of a swipe, and the row numbers and
+   the header, pinned at the box's edge, leave no strip for cells to show
+   through beside them. */
+.sheet-paper {
+  display: inline-block;
+  padding: var(--sp-3);
+}
+/* More columns to the right: the edge fades, as the tab row's does. More
+   to the left: the pinned row numbers get a firmer edge. */
+.sheet-box[data-more-right] {
+  -webkit-mask-image: linear-gradient(to left, transparent, #000 24px);
+  mask-image: linear-gradient(to left, transparent, #000 24px);
+}
+/* Its focus ring is not faded with its edge. */
+.sheet-box[data-more-right]:focus-visible {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+.sheet-box[data-more-left] .sheet-table .rn {
+  box-shadow: 1px 0 0 var(--line-strong);
+}
+/* Only the grid is paper: white, framed, on the raised grey like a PDF's
+   page, so a dark theme is not a white pane. */
+.sheet-table {
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font: 13px/1 Calibri, Carlito, Arial, sans-serif;
+  background: #fff;
+  color: #000;
+  outline: 1px solid var(--line);
+  box-shadow: var(--shadow-1);
+}
+.sheet-table th,
+.sheet-table td {
+  height: var(--ctl-sm);
+  padding: 0 var(--sp-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-right: 1px solid #e0e0e0;
+  border-bottom: 1px solid #e0e0e0;
+  text-align: left;
+}
+.sheet-table thead th,
+.sheet-table .rn {
+  background: #f3f3f3;
+  color: #555;
+  font-weight: 400;
+  text-align: center;
+}
+.sheet-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.sheet-table .rn {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+.sheet-table thead .rn {
+  z-index: 3;
+}
+/* Under the sheet: its tabs, then the size. */
+.file-sheet > .sheet-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--sp-2);
+  padding: 0 var(--sp-2) env(safe-area-inset-bottom) var(--sp-2);
+  min-height: calc(var(--row) + 1px);
+  border-top: 1px solid var(--line);
+  min-width: 0;
+  font-size: var(--t-sm);
+}
+/* The size and the formula note wrap under the tabs on a narrow screen
+   rather than being cut off. */
+.sheet-note {
+  flex: 1 1 14em;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-1);
+  color: var(--text-2);
+  line-height: 1.4;
+}
+.file-sheet > .sheet-foot .btn {
+  min-height: var(--row);
+  flex-shrink: 0;
+  border-color: var(--line-strong);
+}
+.sheet-tabs {
+  display: flex;
+  gap: var(--sp-half);
+  overflow-x: auto;
+  flex-shrink: 0;
+  max-width: 60%;
+  scrollbar-width: none;
+}
+/* A narrow pane: the tabs get their own row, the size and note a full
+   row under them. */
+@container (max-width: 599px) {
+  .sheet-tabs {
+    flex-basis: 100%;
+    max-width: none;
+  }
+}
+.sheet-tab {
+  font: inherit;
+  font-size: var(--t-ui);
+  min-height: var(--row); /* 44 on a touch screen, 28 with a mouse (below) */
+  padding: 0 var(--sp-3);
+  /* A 36 px shape in the 44 px box, as the toolbar's buttons. */
+  border: 4px solid transparent;
+  border-width: 4px 0;
+  border-radius: var(--r-md) / calc(var(--r-md) + var(--sp-1));
+  background: none;
+  background-clip: padding-box;
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+@media (hover: hover) {
+  .sheet-tab:hover {
+    background-color: color-mix(in srgb, var(--hover) 55%, transparent);
+    color: var(--text);
+  }
+}
+@media (pointer: fine) {
+  .sheet-tab {
+    min-height: var(--ctl);
+    border-width: 0;
+    border-radius: var(--r-md);
+  }
+}
+.sheet-tab.on {
+  color: var(--cobalt);
+  background-color: var(--accent-soft);
+  font-weight: 500;
+}
+@media (hover: hover) {
+  .sheet-tab.on:hover {
+    color: var(--cobalt);
+    background-color: var(--accent-soft);
+    font-weight: 500;
+  }
+}
+/* The strip scrolls, so it clips anything outside a tab: the ring is
+   drawn on the tab's own shape, inside the transparent border, the
+   outline kept transparent for forced colours. */
+.sheet-tab:focus-visible {
+  outline-color: transparent;
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+/* The grid takes the focus (Tab, or after Show all): its ring inside it,
+   where the foot and the bar cannot cover it. */
+.sheet-box:focus-visible {
+  outline-offset: -2px;
+}
+/* With a mouse, Show all is as tall as the sheet tabs beside it. */
+@media (pointer: fine) {
+  .file-sheet > .sheet-foot .btn {
+    min-height: var(--ctl);
+    padding-block: 0;
+  }
+}

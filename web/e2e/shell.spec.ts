@@ -44,37 +44,69 @@ test('home opens a folder; the folder list opens another', async ({ page }, info
   await expect(page.locator('.workspace > .bar')).toHaveCount(0)
   await page.screenshot({ path: `test-results/folders-${info.project.name}.png` })
 
-  if (info.project.name !== 'desktop') await page.getByRole('button', { name: 'Show the sidebar' }).click() // the drawer
+  if (info.project.name !== 'desktop') await page.getByRole('button', { name: 'Show the sidebar', exact: true }).click() // the drawer
   await page.locator('.folder-list').getByRole('button', { name: 'Open project' }).click()
   await expect(page.locator('.sheet')).toContainText('Open project')
   // Filtering keeps the sheet's height: sized by its list, it shrank to the
   // bottom of a phone, under the keyboard.
+  // On a phone the sheet takes its tall size once the filter is tapped.
+  await page.getByPlaceholder('Filter recent projects').focus()
+  await page.waitForTimeout(300)
   const tall = (await page.locator('.sheet').boundingBox())!.height
   await page.getByPlaceholder('Filter recent projects').fill('zzz-no-such-project')
   await expect(page.locator('.sheet')).toContainText('Nothing matches.')
-  if (info.project.name !== 'desktop') expect((await page.locator('.sheet').boundingBox())!.height).toBe(tall)
+  if (info.project.name !== 'desktop') expect((await page.locator('.sheet').boundingBox())!.height).toBeCloseTo(tall, 0) // the sheet rises in: a fraction of a pixel
   await page.getByPlaceholder('Filter recent projects').fill('')
   // Browse: each folder with its icon, sortable by name or by last change.
   await page.getByRole('button', { name: 'Browse…' }).click()
   await page.locator('.browse-dir .folder-icon').first().waitFor()
-  // Into a folder and up again, by the button beside the path.
-  const top = await page.getByPlaceholder('Paste a folder path').inputValue()
+  // Into a folder and up again, by the breadcrumb's step before the last.
+  const path = page.locator('.sheet .crumbs')
+  const top = (await path.getAttribute('data-path'))!
   await page.locator('.browse-dir').first().click()
-  await expect(page.getByPlaceholder('Paste a folder path')).not.toHaveValue(top)
-  await page.getByRole('button', { name: 'Up one folder' }).click()
-  await expect(page.getByPlaceholder('Paste a folder path')).toHaveValue(top)
+  await expect(path).not.toHaveAttribute('data-path', top)
+  await path.locator('.crumb').nth(-2).click()
+  await expect(path).toHaveAttribute('data-path', top)
   await page.locator('.browse-dir .folder-icon').first().waitFor()
-  await page.getByRole('button', { name: 'Recently changed' }).click()
+  // Its empty end makes it a field with the path; Escape gives the steps
+  // back and leaves the sheet open.
+  await path.locator('.crumb-end').click()
+  const field = page.locator('.sheet .crumb-edit input')
+  await expect(field).toHaveValue(top)
+  await expect(field).toBeFocused()
+  await field.press('Escape')
+  await expect(path).toBeVisible()
+  await expect(page.locator('.sheet')).toBeVisible()
+  // Sorted from the same small menu as the file explorer's.
+  const sort = async (name: string) => {
+    await page.locator('.sheet').getByRole('button', { name: 'Sort', exact: true }).click()
+    await page.getByRole('menuitemradio', { name }).click()
+    await expect(page.getByRole('menu')).toHaveCount(0)
+    await expect(page.locator('.sheet')).toBeVisible() // picking closed the menu only
+  }
+  await sort('Recent')
   await page.screenshot({ path: `test-results/browse-${info.project.name}.png` })
-  await page.locator('.sheet').getByRole('button', { name: 'A–Z' }).click() // leave it as found
+  await sort('Name') // leave it as found
+  // The foot holds only Open as project: the path is in the breadcrumb.
+  await expect(page.locator('.sheet .sheet-foot')).toHaveText('Open as project')
   // New folder asks for a name where Browse stands (making one is the Go
   // test's; here nothing is made on the real disk).
-  await page.getByRole('button', { name: '+ New folder' }).click()
+  await page.locator('.sheet').getByRole('button', { name: 'New folder', exact: true }).click()
   await expect(page.getByLabel('New folder name')).toBeFocused()
   await expect(page.locator('.new-folder').getByRole('button', { name: 'Create' })).toBeDisabled()
+  // The rows of controls stand in from the sheet's sides, and each row's
+  // controls are of one height (the breadcrumb, Sort and New folder; the
+  // name, Create and Cancel).
+  const sheet = (await page.locator('.sheet').boundingBox())!
+  for (const row of await page.locator('.sheet > :is(.filter-row, .crumb-row)').all()) {
+    const boxes = await row.locator(':scope > :is(button, input, span, div)').evaluateAll((els) => els.map((e) => e.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0).map((r) => ({ x: r.x, right: r.right, h: Math.round(r.height) })))
+    expect(new Set(boxes.map((b) => b.h)).size, 'one height in a row').toBe(1)
+    expect(boxes[0].x - sheet.x, 'room on the left').toBeGreaterThanOrEqual(12)
+    expect(sheet.x + sheet.width - boxes.at(-1)!.right, 'room on the right').toBeGreaterThanOrEqual(12)
+  }
   await page.locator('.new-folder').getByRole('button', { name: 'Cancel' }).click()
   await expect(page.locator('.new-folder')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Cancel' }).click()
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
   await expect(page.locator('.sheet')).toHaveCount(0)
   if (info.project.name !== 'desktop') {
     // A tap beside the drawer closes it.
@@ -82,14 +114,31 @@ test('home opens a folder; the folder list opens another', async ({ page }, info
     await expect(page.locator('.explorer-panel')).toHaveCount(0)
   }
   if (info.project.name === 'desktop') {
-    await page.getByRole('button', { name: 'Hide the sidebar' }).click()
+    await page.getByRole('button', { name: 'Hide the sidebar', exact: true }).click()
     // Nothing beside the tabs but the sidebar button: no folder name (a
     // tab's own title may well contain it, as one did on 2026-10-29).
     await expect(page.locator('.tabs-row > :not(nav):not(button):not(.dot)')).toHaveCount(0)
     await expect(page.locator('.tabs-row > .dot')).toHaveCount(1) // the stream dot moves here from the sidebar
     await page.screenshot({ path: `test-results/explorer-hidden-${info.project.name}.png` })
-    await page.getByRole('button', { name: 'Show the sidebar' }).click() // leave it as found
+    await page.getByRole('button', { name: 'Show the sidebar', exact: true }).click() // leave it as found
   }
+})
+
+// A folder list that will not load leaves the home usable: the failure in
+// words with Try again, and Open project, which browses without the list.
+test('the home stays usable when the folder list fails', async ({ page }) => {
+  let fail = true
+  await page.route('**/api/folders', (r) => (fail && r.request().method() === 'GET' ? r.fulfill({ status: 500, contentType: 'text/plain', body: 'madetest: input/output error' }) : r.fallback()))
+  await page.goto('/login?token=' + token) // lands on the home, with the list failing
+  const problem = page.locator('.home .notice.error')
+  await expect(problem).toContainText('Could not list your projects.')
+  await expect(problem).toContainText('madetest: input/output error')
+  await page.getByRole('button', { name: 'Open project', exact: true }).click()
+  await expect(page.locator('.sheet')).toContainText('Open project')
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  fail = false
+  await problem.getByRole('button', { name: 'Try again' }).click()
+  await expect(problem).toHaveCount(0)
 })
 
 // Double-clicking a tab turns its title into a field with the name in it;
@@ -113,18 +162,30 @@ test('a tab title can be edited in place', async ({ page }, info) => {
 test('the theme button switches light and dark', async ({ page }, info) => {
   await page.emulateMedia({ colorScheme: 'dark' }) // ignored
   await openSession(page, (l) => l[0])
-  if (info.project.name !== 'desktop') await page.getByRole('button', { name: 'Show the sidebar' }).click() // the drawer
+  if (info.project.name !== 'desktop') await page.getByRole('button', { name: 'Show the sidebar', exact: true }).click() // the drawer
   const theme = () => page.evaluate(() => document.documentElement.dataset.theme)
-  const bg = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim())
+  const bg = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--panel').trim())
   expect(await theme()).toBe('light')
-  await page.getByRole('button', { name: 'Switch to dark' }).click()
+  // The settings menu holds the Dark mode switch (the gear at the tab
+  // bar's end on a laptop, Settings at the phone drawer's foot): the
+  // setting itself, its state on the control.
+  const settings = () =>
+    info.project.name === 'desktop'
+      ? page.getByRole('button', { name: 'Settings', exact: true }).click()
+      : page.locator('.drawer-foot').getByRole('button', { name: 'Settings' }).click()
+  const dark = page.getByRole('menuitemcheckbox', { name: 'Dark mode' })
+  await settings()
+  await dark.click()
   expect(await theme()).toBe('dark')
-  expect(await bg()).toBe('#1f1e1c')
+  expect(await bg()).toBe('#1c1b19')
+  await page.keyboard.press('Escape')
   await page.reload()
   await page.locator('.transcript [data-anchor]').first().waitFor()
   expect(await theme()).toBe('dark') // remembered
-  if (info.project.name !== 'desktop') await page.getByRole('button', { name: 'Show the sidebar' }).click()
-  await page.getByRole('button', { name: 'Switch to light' }).click()
+  if (info.project.name !== 'desktop') await page.getByRole('button', { name: 'Show the sidebar', exact: true }).click()
+  await settings()
+  await expect(dark).toHaveAttribute('aria-checked', 'true')
+  await dark.click()
   expect(await theme()).toBe('light')
 })
 
@@ -147,6 +208,39 @@ test('the tab menu copies the command that resumes the session in a terminal', a
   await expect(page.locator('.toast')).toContainText('Copied')
   const text = await page.evaluate(() => (window as unknown as { copied: string }).copied)
   expect(text).toBe(`cd '${s.cwd}'; ${s.provider === 'codex' ? 'codex resume' : 'claude --resume'} ${s.id}`)
+})
+
+// The tab menu from the keyboard: Shift+F10 on a tab puts the focus on
+// its first row, the arrows, Home and End move, Escape and Tab close it
+// and give the focus back to the tab, and the tab's tip is down.
+test('the tab menu works from the keyboard', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'the tab menu is for a laptop')
+  const s = await openSession(page, quiet)
+  const tab = page.locator(`.tab[data-tab="${s.id}"]`)
+  const menu = page.locator('.tab-menu')
+  const focused = () => page.evaluate(() => document.activeElement?.textContent?.trim() ?? '')
+  await tab.focus()
+  await page.keyboard.press('Shift+F10')
+  await expect(menu).toBeVisible()
+  const rows = (await menu.locator('[role="menuitem"]:not(:disabled)').allTextContents()).map((t) => t.trim())
+  await expect.poll(focused).toBe(rows[0])
+  await expect(page.locator('.tip[data-open]')).toHaveCount(0)
+  await page.keyboard.press('ArrowDown')
+  expect(await focused()).toBe(rows[1])
+  await page.keyboard.press('End')
+  expect(await focused()).toBe(rows[rows.length - 1])
+  await page.keyboard.press('Home')
+  expect(await focused()).toBe(rows[0])
+  await page.keyboard.press('ArrowUp')
+  expect(await focused()).toBe(rows[rows.length - 1])
+  await page.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+  await expect(tab).toBeFocused()
+  await page.keyboard.press('Shift+F10')
+  await expect(menu).toBeVisible()
+  await page.keyboard.press('Tab')
+  await expect(menu).toHaveCount(0)
+  await expect(tab).toBeFocused()
 })
 
 // Two sessions side by side: a reply streaming in one never shows in the
@@ -204,6 +298,39 @@ test('two sessions side by side keep to themselves', async ({ page }, info) => {
   await page.unroute('**/api/sessions/*/send')
 })
 
+// Many open projects, all shown: the list scrolls on its own, so the
+// last row can be reached on a phone and the files below keep a share of
+// the sidebar. The panel clips, and the list once could not shrink, so
+// rows past the bottom were out of reach. The extra folders are faked.
+test('a long project list scrolls in the sidebar', async ({ page }, info) => {
+  const s = await openSession(page, quiet)
+  await page.route('**/api/folders', async (r) => {
+    if (r.request().method() !== 'GET') return r.fallback()
+    const real = await (await r.fetch()).json()
+    const fake = Array.from({ length: 20 }, (_, i) => ({ path: s.folder!.slice(0, 3) + 'madetest-many-' + String(i).padStart(2, '0'), open: true, sessions: 1 }))
+    return r.fulfill({ json: [...real, ...fake] })
+  })
+  await page.reload()
+  await page.locator('.transcript [data-anchor]').first().waitFor()
+  if (info.project.name !== 'desktop') await page.getByRole('button', { name: 'Show the sidebar', exact: true }).click()
+  await page.locator('.folder-row.more').click()
+  const last = page.locator('.folder-list > .folder-row', { hasText: 'madetest-many-19' })
+  await expect(last).toHaveCount(1)
+  const fit = await last.evaluate((el) => {
+    let box: HTMLElement | null = el.parentElement
+    while (box && !(['auto', 'scroll'].includes(getComputedStyle(box).overflowY) && box.scrollHeight > box.clientHeight)) box = box.parentElement
+    if (!box) return { scrolls: false, bottom: 0, files: 0 }
+    box.scrollTop = box.scrollHeight
+    const files = document.querySelector('.explorer-panel .explorer')?.getBoundingClientRect().height ?? 0
+    return { scrolls: true, bottom: el.getBoundingClientRect().bottom - Math.min(innerHeight, box.getBoundingClientRect().bottom), files }
+  })
+  await page.screenshot({ path: `test-results/many-projects-${info.project.name}.png` })
+  expect(fit.scrolls).toBe(true)
+  expect(fit.bottom).toBeLessThanOrEqual(1)
+  expect(fit.files).toBeGreaterThan(100)
+  await page.unroute('**/api/folders')
+})
+
 // Renaming a project from its row (move.go): a double-click (a long
 // press on a phone) gives a name box; a refusal says why under the row,
 // and a rename takes the page and its tabs to the new path. The server's
@@ -235,11 +362,16 @@ test('a project is renamed from its row', async ({ page }, info) => {
     mode = 'ok'
     return route.fulfill({ json: {} })
   })
-  if (info.project.name !== 'desktop') await page.getByRole('button', { name: 'Show the sidebar' }).click()
+  if (info.project.name !== 'desktop') await page.getByRole('button', { name: 'Show the sidebar', exact: true }).click()
   const row = page.locator('.folder-row.on')
   const ask = async () => {
     if (info.project.name === 'desktop') await row.dblclick()
-    else await row.dispatchEvent('touchstart').then(() => page.waitForTimeout(700)).then(() => row.dispatchEvent('touchend'))
+    else {
+      // A long press opens the row's menu (its whole path on top); Rename is in it.
+      await row.dispatchEvent('touchstart').then(() => page.waitForTimeout(700)).then(() => row.dispatchEvent('touchend'))
+      await expect(page.locator('.row-menu .menu-title')).toHaveText(folder)
+      await page.locator('.row-menu').getByRole('menuitem', { name: 'Rename' }).click()
+    }
     await expect(page.getByLabel('New folder name')).toBeFocused()
   }
   await ask()
@@ -309,6 +441,26 @@ test('tabs past the row have arrows, one tab a click', async ({ page }, info) =>
   await page.mouse.wheel(0, 300)
   await expect.poll(() => strip.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0)
   await page.screenshot({ path: 'test-results/tab-arrows.png' })
+  // The arrows are the header's icon buttons' size and rounded shape, and
+  // every header button is centred in the bar, clear of its bottom line.
+  const bar = (await page.locator('.tabs-row').first().boundingBox())!
+  const newBtn = (await page.getByRole('button', { name: 'New session' }).first().boundingBox())!
+  for (const b of await page.locator('.tabs-row').first().locator('> button:visible').all()) {
+    const box = (await b.boundingBox())!
+    const name = await b.getAttribute('aria-label')
+    expect(Math.round(box.height), `${name} tall`).toBe(Math.round(newBtn.height))
+    expect(Math.round(bar.y + bar.height - (box.y + box.height)), `${name} clear of the bottom`).toBeGreaterThanOrEqual(3)
+    expect(Math.abs(box.y - bar.y - (bar.y + bar.height - box.y - box.height)), `${name} centred`).toBeLessThanOrEqual(1)
+  }
+  expect(parseFloat(await right.evaluate((el) => getComputedStyle(el).borderTopLeftRadius))).toBeGreaterThan(0)
+  // The tabs' titles and icons are on the buttons' line: each centre
+  // within 1 px of the buttons' centre.
+  const mid = (b: { y: number; height: number }) => b.y + b.height / 2
+  const line = mid(newBtn)
+  const tab = page.locator('.tabs-row .tab').first()
+  for (const part of [tab.locator('.ellipsis'), tab.locator('svg, img').first(), page.locator('.tabs-row .tab.active .ellipsis')]) {
+    expect(Math.abs(mid((await part.boundingBox())!) - line)).toBeLessThanOrEqual(1)
+  }
 })
 
 // On a laptop a tab drags to a new place, which survives a reload.
@@ -404,7 +556,7 @@ test('a page out of touch cannot close the tabs opened elsewhere', async ({ page
 // session finishing in another folder leaves this tab's icon alone, one in
 // this folder (not on screen) marks it. Every tab once marked every
 // finish, so three tabs on three projects all said so. The title is the
-// folder's name alone.
+// folder's name, with a dot in front only while the icon says done.
 test('the tab icon marks finished work in its own folder only', async ({ page }) => {
   const s = await openSession(page, (l) => l[0])
   const all: Session[] = await (await page.request.get('/api/sessions')).json()
@@ -420,7 +572,61 @@ test('the tab icon marks finished work in its own folder only', async ({ page })
   await expect(icon).not.toHaveAttribute('data-state', 'done')
   await play({ type: 'turn', session: here!.id, state: 'done', result: { ok: true } })
   await expect(icon).toHaveAttribute('data-state', 'done')
-  await expect(page).toHaveTitle(/^[^(·]+$/)
+  await expect(page).toHaveTitle(/^● [^(·●]+$/)
+})
+
+// The tab's icon and title through a whole turn, as a person sees them
+// from another browser tab: the inverted tile while it runs, the round
+// disc and a dot before the name once it is done and unread, and back to
+// the quiet tile and the bare name when its session is looked at.
+test('the tab says running, then done, and goes quiet once seen', async ({ page }, info) => {
+  const s = await openSession(page, (l) => l[0])
+  const all: Session[] = await (await page.request.get('/api/sessions')).json()
+  const other = all.find((x) => x.folder === s.folder && x.id !== s.id)
+  test.skip(!other, 'needs a second session in the folder')
+  await seedTabs(page, s.folder!, { ids: [s.id, other!.id], active: s.id })
+  await page.reload()
+  await page.locator('.transcript [data-anchor]').first().waitFor()
+  const play = (ev: object) => page.evaluate((ev) => (window as any).dakort.stream.onEvent(ev), ev)
+  const icon = page.locator('link[rel="icon"]')
+  const name = (await page.title()).replace(/^● /, '')
+  await expect(icon).not.toHaveAttribute('data-state', /run|done/)
+  await expect(page).toHaveTitle(name)
+
+  // The session's own tab: its state in the ×'s slot (the project rows'
+  // spinner while it runs). Done here is the stream's word only (the
+  // session's file did not change), so its unread semibold is not seen.
+  const otherTab = page.locator(`.tabs .tab[data-tab="${other!.id}"]`)
+  const weight = () => otherTab.locator('.ellipsis').evaluate((el) => Number(getComputedStyle(el).fontWeight))
+  await play({ type: 'turn', session: other!.id, state: 'running' })
+  await expect(icon).toHaveAttribute('data-state', 'run')
+  await expect(page).toHaveTitle(name)
+  await expect(otherTab).toHaveAttribute('data-state', 'run')
+  // The project rows' spinner, in the ×'s slot of a tab not in use; the
+  // agent's mark stays still.
+  await expect(otherTab.locator('.tab-x .dot.run')).toBeVisible()
+  await expect(otherTab.locator('.tab-x svg')).toBeHidden()
+  expect(await otherTab.locator('.agent-icon').evaluate((el) => getComputedStyle(el).animationName)).toBe('none')
+  // Under the pointer the × takes the slot back (a phone has no pointer).
+  if (info.project.name === 'desktop') {
+    await otherTab.hover()
+    await expect(otherTab.locator('.tab-x svg')).toBeVisible()
+    await expect(otherTab.locator('.tab-x .dot')).toBeHidden()
+    await page.mouse.move(5, 500)
+  }
+  const href = await icon.getAttribute('href')
+  expect(href).toContain('data:image/svg+xml')
+
+  await play({ type: 'turn', session: other!.id, state: 'done', result: { ok: true } })
+  await expect(icon).toHaveAttribute('data-state', 'done')
+  await expect(page).toHaveTitle('● ' + name)
+  expect(decodeURIComponent((await icon.getAttribute('href'))!)).toContain('<circle')
+
+  await otherTab.click()
+  await expect(icon).toHaveAttribute('data-state', 'idle')
+  await expect(page).toHaveTitle(name)
+  await expect(otherTab).not.toHaveAttribute('data-state', /./)
+  expect(await weight()).toBeLessThan(600) // read: the name at its normal weight
 })
 
 // Nothing shows under the folder list until a server that leaves updates
@@ -428,13 +634,15 @@ test('the tab icon marks finished work in its own folder only', async ({ page })
 // of a newer release (a release event; the snapshot after a reconnect
 // too): then the tag and the line to run on the computer, so the phone
 // learns of it without a terminal. The build itself is at the foot of the
-// Open project sheet and on the PROJECTS header's tooltip, nowhere else.
+// Open project sheet and at the end of the settings menu, nowhere else.
 test('a newer release is announced under the folder list; the build is in the sheet', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'the explorer is a drawer on a phone')
   await openSession(page, (l) => l[0])
   const play = (ev: object) => page.evaluate((ev) => (window as any).dakort.stream.onEvent(ev), ev)
   await expect(page.locator('.notice.release')).toHaveCount(0)
-  await expect(page.locator('.folder-list .fold')).toHaveAttribute('title', /^Dakort \S+$/)
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await expect(page.locator('.settings-menu')).toContainText(/Dakort \S+$/)
+  await page.keyboard.press('Escape')
   await page.locator('.folder-list').getByRole('button', { name: 'Open project' }).click()
   await expect(page.locator('.sheet .sheet-version')).toHaveText(/^Dakort \S+$/)
   await page.locator('.sheet-back').click({ position: { x: 4, y: 4 } })
@@ -445,24 +653,28 @@ test('a newer release is announced under the folder list; the build is in the sh
   await expect(notice).toContainText('dakort update')
 })
 
-// The PROJECTS header in a sidebar dragged narrow (issue 1): + and the
-// hide button stay inside the sidebar, Other devices and the theme fold
-// into a More menu, and the connection dot is off the button row (shown
-// only while reconnecting). On a phone the drawer keeps its full row.
+// The Projects header in a sidebar dragged narrow (issue 1): + stays
+// inside the sidebar, and the connection dot is off the button row (shown
+// only while reconnecting). The hide button is at the tab bar's start, and
+// Other devices and the theme are in the settings menu (the gear at the
+// tab bar's end; Settings at the phone drawer's foot), so the sidebar
+// keeps its height for the files.
 test('the projects header fits a narrow sidebar', async ({ page }, info) => {
   await openSession(page, (l) => l[0])
-  const head = page.locator('.folder-list .panel-head')
-  if (info.project.name !== 'desktop') await page.getByRole('button', { name: 'Show the sidebar' }).click() // the drawer
+  const head = page.locator('.folder-list .side-head')
+  if (info.project.name !== 'desktop') await page.getByRole('button', { name: 'Show the sidebar', exact: true }).click() // the drawer
   await expect(head.locator('.dot.ok')).toBeAttached()
   await expect(head.locator('.dot.ok')).toBeHidden() // connected: quiet
+  await expect(head.getByRole('button', { name: 'Other devices' })).toHaveCount(0)
+  await expect(head.getByRole('button', { name: 'More', exact: true })).toHaveCount(0)
+  await expect(head.getByRole('button', { name: 'Hide the sidebar', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Other devices' })).toHaveCount(0) // a menu item now
   if (info.project.name !== 'desktop') {
-    await expect(head.getByRole('button', { name: 'Other devices' })).toBeVisible()
-    await expect(head.getByRole('button', { name: 'More', exact: true })).toHaveCount(0)
+    await page.locator('.drawer-foot').getByRole('button', { name: 'Settings' }).click()
+    await expect(page.getByRole('menuitem', { name: 'Other devices' })).toBeVisible()
     return
   }
-  // The default width holds the whole row.
-  await expect(head.getByRole('button', { name: 'Other devices' })).toBeVisible()
-  await expect(head.getByRole('button', { name: 'More', exact: true })).toHaveCount(0)
+  await expect(page.locator('.drawer-foot')).toHaveCount(0) // no foot on a laptop
   // Dragged as narrow as it goes.
   const bar = (await page.locator('.splitter').boundingBox())!
   await page.mouse.move(bar.x + bar.width / 2, bar.y + 200)
@@ -471,27 +683,20 @@ test('the projects header fits a narrow sidebar', async ({ page }, info) => {
   await page.mouse.up()
   const panel = (await page.locator('.explorer-panel').boundingBox())!
   expect(panel.width).toBeLessThan(260)
-  for (const name of ['Open project', 'Hide the sidebar', 'More']) {
-    const b = (await head.getByRole('button', { name }).boundingBox())!
-    expect(b.x + b.width, name).toBeLessThanOrEqual(panel.x + panel.width)
-  }
-  await expect(head.getByRole('button', { name: 'Other devices' })).toHaveCount(0)
-  await head.getByRole('button', { name: 'More', exact: true }).click()
-  const menu = page.locator('.head-menu')
-  await expect(menu.getByRole('menuitem')).toHaveText(['Other devices', 'Switch to dark'])
-  await menu.getByRole('menuitem', { name: 'Switch to dark' }).click()
-  await expect(menu).toHaveCount(0)
-  expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('dark')
-  await head.getByRole('button', { name: 'More', exact: true }).click()
-  await menu.getByRole('menuitem', { name: 'Switch to light' }).click()
-  await head.getByRole('button', { name: 'More', exact: true }).click()
-  await menu.getByRole('menuitem', { name: 'Other devices' }).click()
+  await head.hover()
+  const b = (await head.getByRole('button', { name: 'Open project' }).boundingBox())!
+  expect(b.x + b.width).toBeLessThanOrEqual(panel.x + panel.width)
+  // The view's name and its actions never wrap: one line at this width.
+  const files = (await page.locator('.files-head').boundingBox())!
+  expect(files.height).toBeLessThan(40)
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Other devices' }).click()
   await expect(page.locator('.sheet')).toContainText('Other devices')
   // Back to the default width for the checks after this one.
   await page.evaluate(() => localStorage.removeItem('dakort.explorerWidth'))
 })
 
-// The Other devices panel (the icon beside the moon): on the computer the
+// The Other devices panel (in the settings menu): on the computer the
 // first opening asks for a password, then it shows the address and a QR
 // code with a Change password link; Tailscale off is said in the panel.
 // The server's answers are played here, so the check does not depend on
@@ -510,9 +715,11 @@ test('the devices panel asks for a password once, then shows the address and a c
   })
   const open = async () => {
     // The drawer, on a phone; it stays open once the sheet closes.
-    const show = page.getByRole('button', { name: 'Show the sidebar' })
+    const show = page.getByRole('button', { name: 'Show the sidebar', exact: true })
     if (info.project.name !== 'desktop' && (await show.isVisible())) await show.click()
-    await page.getByRole('button', { name: 'Other devices' }).click()
+    if (info.project.name === 'desktop') await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    else await page.locator('.drawer-foot').getByRole('button', { name: 'Settings' }).click()
+    await page.getByRole('menuitem', { name: 'Other devices' }).click()
     await expect(page.locator('.sheet')).toContainText('Other devices')
   }
   await open()
@@ -541,6 +748,32 @@ test('the devices panel asks for a password once, then shows the address and a c
   await open()
   await expect(sheet).toContainText('not running')
   await expect(sheet.locator('.devices-addr')).toHaveCount(0)
+})
+
+// The devices panel when the server cannot list the addresses: what
+// failed in the app's words, the server's reason under it, and Try again.
+test('the devices panel says when it cannot read the addresses', async ({ page }, info) => {
+  await openSession(page, (l) => l[0])
+  let fail = true
+  await page.route('**/api/devices', (route) =>
+    fail
+      ? route.fulfill({ status: 500, contentType: 'text/plain', body: 'madetest: exit status 1' })
+      : route.fulfill({ json: { tailscale: 'down', addrs: [], localUrl: 'http://127.0.0.1:3003/', passwordSet: true, local: true } }),
+  )
+  const show = page.getByRole('button', { name: 'Show the sidebar', exact: true })
+  if (info.project.name !== 'desktop' && (await show.isVisible())) await show.click()
+  if (info.project.name === 'desktop') await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  else await page.locator('.drawer-foot').getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('menuitem', { name: 'Other devices' }).click()
+  const sheet = page.locator('.sheet')
+  const alert = sheet.getByRole('alert')
+  await expect(alert).toContainText("Could not read this computer’s addresses.")
+  await expect(alert).toContainText('madetest: exit status 1')
+  await expect(sheet).not.toContainText('…')
+  fail = false
+  await sheet.getByRole('button', { name: 'Try again' }).click()
+  await expect(alert).toHaveCount(0)
+  await expect(sheet).toContainText('not running')
 })
 
 // Installable: the page names the manifest and the iOS meta, the manifest
@@ -587,6 +820,135 @@ test('the app is installable, and an old service worker is removed', async ({ br
   }
 })
 
+// The phone's tab row (the owner's "lth": a neighbour cut to its last
+// letters at the left edge). With several tabs it shows the active one
+// whole, the row wide, and nothing else; a swipe shows the next one; a
+// title too long for its tab fades out at its end. Every
+// control in the header is a 44 px target. File tabs, so no session but
+// the first is needed.
+test('the phone tab row never cuts a tab at its left edge; header targets are 44 px', async ({ page }, info) => {
+  test.skip(info.project.name === 'desktop', 'the phone row')
+  const s = await openSession(page, (l) => l[0])
+  const ids = [s.id, ...['a-rather-long-file-name-for-the-strip.md', 'notes.md', 'another-long-name-to-cut-off.ts', 'x.go'].map((n) => 'f:madetest-' + n)]
+  const strip = page.locator('.tabs-row .tabs')
+  const look = () =>
+    strip.evaluate((el) => {
+      const s = el.getBoundingClientRect()
+      const tabs = [...el.querySelectorAll<HTMLElement>('[data-tab]')].map((t) => {
+        const r = t.getBoundingClientRect()
+        const title = t.querySelector<HTMLElement>('.ellipsis')!
+        return {
+          id: t.dataset.tab,
+          seen: Math.min(r.right, s.right) - Math.max(r.left, s.left) > 0.5,
+          cutLeft: r.left < s.left - 0.5,
+          cutRight: r.right > s.right + 0.5,
+          titleCut: title.scrollWidth > title.clientWidth + 1,
+          ellipsis: getComputedStyle(title).textOverflow,
+        }
+      })
+      const a = el.querySelector('.tab.active')!.getBoundingClientRect()
+      return { tabs, fade: getComputedStyle(el).webkitMaskImage || getComputedStyle(el).maskImage, activeClear: s.right - a.right, more: el.hasAttribute('data-more-right') }
+    })
+  for (const active of [ids[2], ids[4], ids[3]]) {
+    await seedTabs(page, s.folder!, { ids, active })
+    await page.reload()
+    await expect(page.locator('.tab.active')).toHaveAttribute('data-tab', active)
+    await page.waitForTimeout(300) // titles arrive, the row settles
+    const { tabs, fade, activeClear } = await look()
+    // With several tabs one shows at a time, the row wide: nothing peeks in
+    // beside the count (a lone faded icon read as a disabled button), so
+    // there is nothing to fade either.
+    expect(tabs.filter((t) => t.seen).map((t) => t.id)).toEqual([active])
+    expect(Math.abs(activeClear)).toBeLessThan(1)
+    expect(fade).not.toContain('gradient')
+    for (const t of tabs.filter((t) => t.seen)) {
+      expect(t.cutLeft, `${t.id} cut at the left edge`).toBe(false)
+      if (t.titleCut) expect(t.ellipsis, `${t.id}'s title cut without its end fading`).toBe('clip')
+    }
+    expect(tabs.find((t) => t.id === active)).toMatchObject({ seen: true, cutLeft: false, cutRight: false })
+    if (tabs.some((t) => t.seen && t.cutRight)) expect(fade, 'a tab cut at the right edge fades out').toContain('gradient')
+  }
+  // A swipe (a touch, then the row moves) comes to rest on the next tab,
+  // whole, and shows it. A scroll with no touch, as WebKit's on reload,
+  // never picks a tab: the three reloads above would have switched it.
+  await strip.evaluate((el) => {
+    el.dispatchEvent(new Event('touchstart', { bubbles: true }))
+    el.scrollBy({ left: 60 })
+  })
+  await expect(page.locator('.tab.active')).toHaveAttribute('data-tab', ids[4])
+  await page.waitForTimeout(300)
+  for (const t of (await look()).tabs.filter((t) => t.seen)) expect(t.cutLeft, `${t.id} cut at the left edge after a swipe`).toBe(false)
+  await page.screenshot({ path: 'test-results/phone-tab-row.png' })
+
+  // Every control in the header: the sidebar, the shown tab's ×, the tab
+  // count (which one of how many), history, new session.
+  const row = page.locator('.editor-panel .tabs-row').first()
+  const controls = row.locator('button:visible')
+  expect(await controls.count()).toBeGreaterThanOrEqual(5)
+  // One × (a tab not in use may show its state's mark in the ×'s slot).
+  await expect(row.locator('.tab-x svg:visible')).toHaveCount(1)
+  await expect(row.locator('.tab-count')).toHaveText(`${ids.indexOf(ids[4]) + 1}/${ids.length}`)
+  for (const b of await controls.all()) {
+    const box = (await b.boundingBox())!
+    const name = (await b.getAttribute('aria-label')) ?? (await b.textContent())
+    expect(box.width, `${name} wide`).toBeGreaterThanOrEqual(44)
+    expect(box.height, `${name} tall`).toBeGreaterThanOrEqual(44)
+  }
+  // A title of a usual length ("Dark mode toggle", 16 characters)
+  // shows whole with other tabs open: the × and the count leave it room.
+  const short = 'f:madetest-wip.md' // as wide as "Dark mode toggle"
+  await seedTabs(page, s.folder!, { ids: [s.id, short, ids[2]], active: short })
+  await page.reload()
+  await expect(page.locator('.tab.active')).toHaveAttribute('data-tab', short)
+  await page.waitForTimeout(300)
+  const fits = await page.locator('.tab.active .ellipsis').evaluate((el) => {
+    const r = document.createRange() // the text's own width, the box being wider
+    r.selectNodeContents(el)
+    return r.getBoundingClientRect().width <= el.clientWidth
+  })
+  expect(fits, 'a title as long as "Dark mode toggle" uncut').toBe(true)
+  // A longer one fades out at its end rather than ending in "…".
+  expect(await page.locator('.tab.active .ellipsis').evaluate((el) => getComputedStyle(el).textOverflow)).toBe('clip')
+
+  // The ×'s target is beside the title, not over it: a tap at a title's
+  // end shows the tab, it does not close it.
+  const titleEnd = await page.locator('.tab.active .ellipsis').evaluate((el) => el.getBoundingClientRect().right)
+  expect((await page.locator('.tab.active .tab-x').boundingBox())!.x).toBeGreaterThanOrEqual(titleEnd - 0.5)
+
+  // One tab: no count, and its × is there, 44 px.
+  await seedTabs(page, s.folder!, { ids: [s.id], active: s.id })
+  await page.reload()
+  await expect(page.locator('.tab')).toHaveCount(1)
+  await expect(page.locator('.tab-count')).toHaveCount(0)
+  const x = (await page.locator('.tab .tab-x').boundingBox())!
+  expect(Math.min(x.width, x.height)).toBeGreaterThanOrEqual(44)
+})
+
+// On a phone a long press on a tab opens its menu (the laptop's
+// right-click menu): hung from the tab, inside the screen, with the tab's
+// whole title and 44 px rows.
+test('a long press on a phone tab opens its menu under the tab', async ({ page }, info) => {
+  test.skip(info.project.name === 'desktop', 'right-click on a laptop')
+  const s = await openSession(page, (l) => l[0])
+  const tab = page.locator(`.tab[data-tab="${s.id}"]`)
+  await tab.dispatchEvent('touchstart')
+  await page.waitForTimeout(700)
+  await tab.dispatchEvent('touchend')
+  const menu = page.locator('.tab-menu')
+  await expect(menu).toBeVisible()
+  await expect(menu.locator('.menu-title')).toHaveText(s.title)
+  await expect(menu.getByRole('menuitem', { name: 'Copy resume command' })).toBeVisible()
+  const m = (await menu.boundingBox())!
+  const t = (await tab.boundingBox())!
+  const vw = page.viewportSize()!
+  expect(m.x).toBeGreaterThanOrEqual(0)
+  expect(m.x + m.width).toBeLessThanOrEqual(vw.width)
+  expect(m.y).toBeGreaterThanOrEqual(t.y + t.height - 1)
+  for (const item of await menu.getByRole('menuitem').all()) expect((await item.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+  await page.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+})
+
 // The terminal: the button opens a panel with a shell in the project's
 // folder, what is typed runs, + adds a second, a reload draws the first
 // one's output again (the shells live in the server), and closing the
@@ -609,7 +971,9 @@ test('a terminal runs in the project, survives a reload, and closes', async ({ p
   const screen = panel.locator('.term-view:visible .xterm-rows')
   await expect(screen).toBeVisible()
   // The typed line shows the words once, its output a second time.
-  const seen = async (s: string) => ((await screen.innerText()).match(new RegExp(s, 'g')) ?? []).length
+  // The rows joined: on a phone's width a prompt and the command typed
+  // after it wrap, which cut the command's words across two rows.
+  const seen = async (s: string) => ((await screen.innerText()).replace(/\n/g, '').match(new RegExp(s, 'g')) ?? []).length
   await expect.poll(async () => (await screen.innerText()).trim().length, { timeout: 20_000 }).toBeGreaterThan(0) // the prompt
   await panel.locator('.term-view:visible').click()
   await page.keyboard.type('echo madetest-one')
@@ -624,8 +988,25 @@ test('a terminal runs in the project, survives a reload, and closes', async ({ p
   await expect(tabs).toHaveCount(1)
   await expect(button).toHaveAttribute('aria-pressed', 'true')
   await expect.poll(() => seen('madetest-one'), { timeout: 20_000 }).toBeGreaterThanOrEqual(2)
+  // The terminal follows the theme: its background is the panel's, light
+  // and dark, and switches while open.
+  const bg = () =>
+    page.evaluate(() => {
+      const panel = getComputedStyle(document.documentElement).getPropertyValue('--panel').trim()
+      const v = document.querySelector<HTMLElement>('.term-view:not([style*="none"]) .xterm-scrollable-element')!
+      const c = document.createElement('div')
+      c.style.color = panel
+      document.body.append(c)
+      const want = getComputedStyle(c).color
+      c.remove()
+      return { want, got: getComputedStyle(v).backgroundColor }
+    })
+  let b = await bg()
+  expect(b.got).toBe(b.want)
   await page.emulateMedia({ colorScheme: 'dark' })
   await page.evaluate(() => (document.documentElement.dataset.theme = 'dark'))
+  await expect.poll(async () => ((b = await bg()), b.got === b.want)).toBe(true)
+  expect(b.got).not.toBe('rgb(253, 252, 250)') // not the light panel
   await page.screenshot({ path: 'test-results/terminal-dark.png' })
   await page.evaluate(() => (document.documentElement.dataset.theme = 'light'))
 
@@ -648,13 +1029,21 @@ test('a terminal runs in the project, survives a reload, and closes', async ({ p
 // Ctrl lets go after one key. Back leaves the shell running; opened again,
 // its output is there.
 async function phoneTerminal(page: Page, folder: string) {
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click()
+  // The phone's header keeps its room for the tab: the terminal is a row
+  // at the drawer's foot.
+  const openTerminal = async () => {
+    await page.getByRole('button', { name: 'Show the sidebar', exact: true }).click()
+    await page.getByRole('button', { name: 'Terminal', exact: true }).click()
+  }
+  await openTerminal()
   const panel = page.getByRole('region', { name: 'Terminal' })
   await expect(panel).toBeVisible()
   const box = (await panel.boundingBox())!
   expect(box.width).toBe(page.viewportSize()!.width) // the whole screen
   const screen = panel.locator('.term-view:visible .xterm-rows')
-  const seen = async (s: string) => ((await screen.innerText()).match(new RegExp(s, 'g')) ?? []).length
+  // The rows joined: on a phone's width a prompt and the command typed
+  // after it wrap, which cut the command's words across two rows.
+  const seen = async (s: string) => ((await screen.innerText()).replace(/\n/g, '').match(new RegExp(s, 'g')) ?? []).length
   await expect.poll(async () => (await screen.innerText()).trim().length, { timeout: 20_000 }).toBeGreaterThan(0)
   await panel.locator('.term-view:visible').click()
   await page.keyboard.type('echo madetest-two')
@@ -677,9 +1066,124 @@ async function phoneTerminal(page: Page, folder: string) {
   await expect.poll(() => seen('madetest-after'), { timeout: 20_000 }).toBeGreaterThanOrEqual(2)
   expect(await seen('madetest-dropped')).toBe(1) // typed, never run
 
+  // The key that puts the keyboard away is pinned at the row's right end,
+  // and takes the focus out of the shell.
+  const hide = keys.getByRole('button', { name: 'Hide the keyboard' })
+  const bar = (await keys.boundingBox())!
+  const hb = (await hide.boundingBox())!
+  expect(Math.abs(bar.x + bar.width - (hb.x + hb.width))).toBeLessThanOrEqual(12)
+  expect(hb.width).toBeGreaterThanOrEqual(44)
+  await hide.click()
+  expect(await page.evaluate(() => !!document.activeElement?.closest('.term-view'))).toBe(false)
+
   await panel.getByRole('button', { name: 'Hide the terminal' }).click()
   await expect(panel).toHaveCount(0)
-  await page.getByRole('button', { name: 'Terminal', exact: true }).click()
+  await openTerminal()
   await expect.poll(() => seen('madetest-after'), { timeout: 20_000 }).toBeGreaterThanOrEqual(2)
   for (const t of await (await page.request.get('/api/terms?folder=' + encodeURIComponent(folder))).json()) await page.request.post(`/api/terms/${t.id}/close`, { data: {} })
 }
+
+// The activity bar (laptop only), VS Code's: the mark on top, a button
+// per sidebar view with the one shown marked, the history and terminal
+// after them, the settings at the foot. A view's button switches the
+// sidebar to it; the shown one's hides the sidebar, and the bar stays.
+// Every status mark has one outer diameter: the filled dot (done,
+// unread), the still ring (background tasks), the turning ring
+// (running), the needs-you triangle and the failed cross, a ring's stroke counted inside, in each place they stand:
+// a project row, a tab, a tool row and a group's header. Each kind is put
+// in each place and measured there (the place's own rules apply).
+test('status marks are one size everywhere', async ({ page }) => {
+  await openSession(page, quiet)
+  const places = ['.folder-list .folder-row .row-end', '.tabs-row .tab.active .tab-x', '.transcript .tool-run .tool-line:not(.run-line) .tool-mark', '.transcript .run-line .tool-mark']
+  await page.locator('.transcript .run-line').first().click()
+  if (!(await page.locator('.folder-list').isVisible())) await page.getByRole('button', { name: 'Show the sidebar', exact: true }).click()
+  const sizes = await page.evaluate((places) => {
+    const out: Record<string, [number, number]> = {}
+    const painted_: Record<string, number> = {}
+    for (const place of places) {
+      const host = document.querySelector<HTMLElement>(place)
+      if (!host) {
+        out[place + ' (missing)'] = [0, 0]
+        continue
+      }
+      for (const kind of ['done', 'unread', 'failed', 'tasks', 'run', 'needs', 'fail']) {
+        const d = document.createElement('span')
+        d.className = 'dot ' + kind
+        d.style.display = 'inline-block' // a tab shows its mark only when not in use
+        host.append(d)
+        const r = d.getBoundingClientRect()
+        out[`${place} ${kind}`] = [Math.round(r.width * 10) / 10, Math.round(r.height * 10) / 10]
+        // What the eye sees: a solid dot paints only its content box, so
+        // every solid one must keep the same inset wherever it stands (a
+        // later colour rule once reset it and the red dot looked bigger).
+        const cs = getComputedStyle(d)
+        const painted = cs.backgroundClip === 'content-box' ? r.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) : r.width
+        painted_[`${place} ${kind}`] = Math.round(painted * 10) / 10
+        d.remove()
+      }
+    }
+    return { out, painted_ }
+  }, places)
+  const all = Object.entries(sizes.out)
+  expect(all.length).toBe(places.length * 7)
+  const solid = Object.entries(sizes.painted_).filter(([k]) => /(done|unread|failed)$/.test(k))
+  for (const [where, p] of solid) expect(p, where + ' painted').toBe(solid[0][1])
+  expect(solid[0][1]).toBeLessThan(all[0][1][0])
+  for (const [where, [w, h]] of all) {
+    expect([w, h], where).toEqual(all[0][1])
+    expect(w, where).toBeGreaterThan(0)
+  }
+})
+
+// The sidebar names its view and has no row of tabs.
+test('the activity bar switches and hides the sidebar', async ({ page }, info) => {
+  await openSession(page, quiet)
+  if (info.project.name !== 'desktop') {
+    await expect(page.locator('.activity-bar')).toHaveCount(0) // the phone has the sheet
+    return
+  }
+  const bar = page.locator('.activity-bar')
+  const explorer = bar.getByRole('button', { name: 'File explorer', exact: true })
+  const scm = bar.getByRole('button', { name: /^Changes/ })
+  const side = page.locator('.explorer-panel')
+  await expect(bar.locator('.brand-mark')).toBeVisible()
+  await expect(page.locator('.explorer-panel .brand')).toHaveCount(0) // the mark shows once
+  await expect(side.locator('.side-tabs')).toHaveCount(0)
+  await expect(explorer).toHaveAttribute('aria-pressed', 'true')
+  await expect(side.locator('.files-head .explorer-title')).toHaveText('File explorer')
+  await scm.click()
+  await expect(scm).toHaveAttribute('aria-pressed', 'true')
+  await expect(explorer).toHaveAttribute('aria-pressed', 'false')
+  await expect(side.locator('.files-head .explorer-title')).toHaveText('Changes')
+  // The view shown, again: the sidebar goes, the bar stays, nothing marked.
+  await scm.click()
+  await expect(side).toHaveCount(0)
+  await expect(bar).toBeVisible()
+  await expect(scm).toHaveAttribute('aria-pressed', 'false')
+  // Another view's button brings it back on that view.
+  await explorer.click()
+  await expect(side.locator('.files-head .explorer-title')).toHaveText('File explorer')
+  // The tab bar's own hide button still hides it.
+  await page.getByRole('button', { name: 'Hide the sidebar', exact: true }).click()
+  await expect(side).toHaveCount(0)
+  await page.getByRole('button', { name: 'Show the sidebar', exact: true }).click()
+  await expect(side).toBeVisible()
+  // The history is not in the bar: it stays on the pane's own bar, by
+  // New session. The settings menu opens from the bar's foot.
+  await expect(bar.getByRole('button', { name: 'Session history' })).toHaveCount(0)
+  await page.locator('.tabs-row').getByRole('button', { name: 'Session history' }).first().click()
+  await expect(page.locator('.history[role="dialog"]')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await bar.getByRole('button', { name: 'Settings', exact: true }).click()
+  await expect(page.getByRole('menuitem', { name: 'Other devices' })).toBeVisible()
+  // Closed with a click elsewhere: closed with Escape, the focus goes
+  // back to the gear, visibly, and its tip shows (as it should).
+  await page.mouse.click(600, 400)
+  await expect(page.getByRole('menuitem', { name: 'Other devices' })).toHaveCount(0)
+  // Its tips sit to the right of the icon, 6 px off.
+  await explorer.hover()
+  const tip = page.locator('#tip[data-open]')
+  await expect(tip).toHaveText('File explorer')
+  const e = (await explorer.boundingBox())!
+  expect(Math.round((await tip.boundingBox())!.x - (e.x + e.width))).toBe(6)
+})

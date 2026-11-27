@@ -1,7 +1,12 @@
 import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { loadConfig, onConfig, refreshConfig, useConfig, type ClaudeModel, type Config } from './config'
-import { AgentIcon, GlobeIcon } from './icons'
+import { AgentIcon, ChevronDownIcon, GlobeIcon } from './icons'
 import { MenuOption, MenuSwitch, PopMenu, RowText } from './PopMenu'
+import { Button } from '@/components/ui/button'
+import { menuItem } from '@/lib/menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { cn } from '@/lib/utils'
+import { segItem, segList } from '@/lib/seg'
 
 // The session's agent, model and settings in one panel above the composer,
 // after the VS Code extension's picker. Empty means the CLI's own default
@@ -15,10 +20,11 @@ import { MenuOption, MenuSwitch, PopMenu, RowText } from './PopMenu'
 // A session with history keeps its agent (a transcript cannot change
 // hands): its panel is its own agent's page alone, no switch.
 //
-// The session's page carries the check and its settings (effort; for
-// Claude also Ultracode, Chrome and, once the session exists, compaction
-// when idle), each a label with a short caption under it and the full
-// explanation in its tooltip.
+// Each page has the same layout: Default and the newest models (the rest
+// behind More models), then the settings that apply to that agent (effort
+// for both, a compact menu on its row; for Claude also Chrome and, once
+// the session exists, compaction when idle), each a label with a short
+// caption under it. Ultracode is not offered here (review of 2026-11-24).
 
 export type Choice = { model: string; effort: string; ultracode: boolean; chrome: boolean }
 
@@ -38,6 +44,18 @@ loadConfig().then(take)
 onConfig(take) // a later answer (the panel asks again as it opens)
 const efforts = ['low', 'medium', 'high', 'xhigh', 'max']
 const effortLabel = (e: string) => (e === 'xhigh' ? 'XHigh' : e ? e[0].toUpperCase() + e.slice(1) : 'Default')
+
+// rowOf splits the CLI's line for a model ("Opus 5.5 · Best for everyday,
+// complex tasks · $4/$20 per Mtok") into the row's parts: the name with
+// its version, then what it is for with the price after it, as the
+// caption (the row has no tip: it would cover the rows below).
+export function rowOf(label: string, desc: string) {
+  const bits = desc.split(' · ').map((b) => b.trim()).filter(Boolean)
+  let name = label
+  // (Only a part of its own: "GPT-6.1 Terra Codex model." is a caption.)
+  if (bits.length > 1 && bits[0].toLowerCase().startsWith(label.toLowerCase())) name = bits.shift()!
+  return { name, caption: bits.join(' · ') }
+}
 
 export const modelLabel = (id: string) => models.find((m) => m.id === id)?.label ?? id
 
@@ -76,14 +94,23 @@ export function ModelPicker({ value, onChange, onSwitch, provider, idleCompact }
   // Claude's default: the settings' pick, else what the CLI says "default"
   // means. (The settings may name a full id, claude-opus-5-5: shown by its name.)
   const defaultOf = (p: Agent) => (p === 'codex' ? cfg.codex?.defaultModel : aliasOf(cfg.defaultModel || cfg.claude?.defaultModel || '')) ?? ''
+  // What Default is, and where that comes from: the user's settings, else
+  // the CLI's own pick (Claude's; Codex's comes from its config).
+  const defaultCaption = (p: Agent) => {
+    const def = defaultOf(p)
+    if (!def) return `From your ${agentName(p)} settings`
+    const fromSettings = p === 'codex' || !!cfg.defaultModel
+    return `${labelOf(p, def)} (${fromSettings ? 'from your settings' : `${agentName(p)}'s default`})`
+  }
   const codex = current === 'codex'
   const who = agentName(current)
   const defaultEffort = (codex ? cfg.codex?.defaultEffort : cfg.defaultEffort) ?? ''
-  // Codex's models each say which efforts they take.
-  const steps = (codex && cfg.codex?.models.find((m) => m.id === (value.model || defaultOf('codex')))?.efforts) || efforts
 
   const shownModel = value.model || defaultOf(current)
-  const chip = (shownModel ? labelOf(current, shownModel) : 'Default') + ' · ' + effortLabel(value.effort || defaultEffort)
+  // The chip names the effort only when one applies (picked here, or set
+  // in the settings): "Opus · Default" read as if Default were the model.
+  const shownEffort = value.effort || defaultEffort
+  const chip = (shownModel ? labelOf(current, shownModel) : 'Default') + (shownEffort ? ' · ' + effortLabel(shownEffort) : '')
 
   // Why an agent's models cannot be picked: not installed, or (Codex)
   // installed but it listed no models, which is how a missing sign-in shows.
@@ -106,69 +133,67 @@ export function ModelPicker({ value, onChange, onSwitch, provider, idleCompact }
     return null
   }
 
-  // The session's own settings, under its models.
-  const settings = () => (
-    <>
-      <div className="picker-row static" title={`How much the model thinks before it answers. Default leaves it to ${who} for the model${defaultEffort ? ` (${effortLabel(defaultEffort)} here)` : ''}.`}>
-        <RowText label="Effort" caption="How hard it thinks" />
-        {/* Default sends no --effort and the CLI picks; it sat at the
-            left of the scale and read as the lowest, so it stands apart. */}
-        <button
-          type="button"
-          data-item
-          className={'effort-default' + (value.effort === '' ? ' on' : '')}
-          title={`Whatever ${who} picks for the model`}
-          aria-label="Effort Default"
-          aria-pressed={value.effort === ''}
-          onClick={() => onChange({ ...value, effort: '' })}
-        >
-          Default
-        </button>
-        <div className="effort">
-          {steps.map((e) => (
-            <button
-              type="button"
-              key={e}
-              data-item
-              className={'effort-step' + (value.effort === e ? ' on' : '')}
-              title={effortLabel(e)}
-              aria-label={'Effort ' + effortLabel(e)}
-              aria-pressed={value.effort === e}
-              onClick={() => onChange({ ...value, effort: e })}
-            />
-          ))}
+  // A page's settings, under its models: the same rows for both agents,
+  // each where it applies (effort for both; Chrome, and compaction once
+  // the session exists, for Claude). On the other agent's page a change
+  // makes the session that agent's, as a model picked there does.
+  const settings = (p: Agent, v: Choice, set: (c: Choice) => void) => {
+    const isCodex = p === 'codex'
+    const defEffort = (isCodex ? cfg.codex?.defaultEffort : cfg.defaultEffort) ?? ''
+    const steps = (isCodex && cfg.codex?.models.find((m) => m.id === (v.model || defaultOf('codex')))?.efforts) || efforts
+    return (
+      <div className="picker-settings">
+        {/* Effort as one row with its label, a compact menu at its end
+            (Cursor's and Claude desktop's way), not a strip of six. */}
+        <div className="picker-row static setting-row px-2 pointer-coarse:px-3">
+          <RowText label="Effort" caption="How hard it thinks" />
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="effort-select h-7 min-w-24 justify-between gap-1 px-2.5 font-normal" data-item aria-label={'Effort: ' + effortLabel(v.effort)}>
+                {effortLabel(v.effort)}
+                <ChevronDownIcon sm />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="effort-menu min-w-36">
+              <DropdownMenuRadioGroup value={v.effort || 'default'} onValueChange={(e) => set({ ...v, effort: e === 'default' ? '' : e })}>
+                <DropdownMenuRadioItem value="default">
+                  Default
+                  {defEffort && <span className="ml-auto pl-3 text-xs text-muted-foreground">{effortLabel(defEffort)}</span>}
+                </DropdownMenuRadioItem>
+                <DropdownMenuSeparator />
+                {steps.map((e) => (
+                  <DropdownMenuRadioItem key={e} value={e}>
+                    {effortLabel(e)}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
+        {/* Ultracode is not offered; a session that has it on keeps a
+            switch to turn it off. */}
+        {!isCodex && v.ultracode && <MenuSwitch label="Ultracode" caption="On for this session" on onToggle={() => set({ ...v, ultracode: false })} />}
+        {/* Off by default: its 18 tools cost context on every turn. */}
+        {!isCodex && <MenuSwitch label="Chrome" caption="Browse with Claude in Chrome" on={v.chrome} onToggle={() => set({ ...v, chrome: !v.chrome })} />}
+        {!isCodex && p === current && idleCompact && (
+          <MenuSwitch label="Compact when idle" caption="Summarise before the cache expires" on={idleCompact.on} onToggle={idleCompact.toggle} />
+        )}
       </div>
-      {!codex && (
-        <MenuSwitch
-          label="Ultracode"
-          caption="Multi-agent workflows"
-          title="Ultracode: the session's turns run multi-agent workflows."
-          on={value.ultracode}
-          onToggle={() => onChange({ ...value, ultracode: !value.ultracode })}
-        />
-      )}
-      {/* Off by default: its 18 tools cost context on every turn. */}
-      {!codex && (
-        <MenuSwitch
-          label="Chrome"
-          caption="Browse with Claude in Chrome"
-          title="Drive your Chrome through the Claude extension. Off by default: its tools cost context on every turn."
-          on={value.chrome}
-          onToggle={() => onChange({ ...value, chrome: !value.chrome })}
-        />
-      )}
-      {!codex && idleCompact && (
-        <MenuSwitch
-          label="Compact when idle"
-          caption="Summarise before the cache expires"
-          title="Over 200k tokens, compact the session about 5 minutes before its prompt cache expires, so a later message reads a short summary instead of the whole context."
-          on={idleCompact.on}
-          onToggle={idleCompact.toggle}
-        />
-      )}
-    </>
-  )
+    )
+  }
+
+  // The models a page shows at first: Default, the newest of each family
+  // (GPT-6.2-Sol over GPT-6.1-Sol, Opus 5.5 over an older Opus) and the one
+  // in use; the rest wait behind More models.
+  const [more, setMore] = useState<Partial<Record<Agent, boolean>>>({})
+  const firstOf = <M extends { id: string; label: string }>(list: M[], inUse: string): M[] => {
+    const ver = (l: string) => parseFloat(/(\d+(?:\.\d+)?)/.exec(l)?.[1] ?? '0')
+    const fam = (l: string) => l.replace(/[\d.\s-]+/g, ' ').trim().toLowerCase()
+    const best = new Map<string, number>()
+    for (const m of list) best.set(fam(m.label), Math.max(best.get(fam(m.label)) ?? 0, ver(m.label)))
+    const top = list.filter((m) => ver(m.label) === best.get(fam(m.label)) || m.id === inUse)
+    return top.length >= list.length - 1 ? list : top
+  }
 
   const body = (p: Agent) => {
     const mine = p === current
@@ -179,10 +204,14 @@ export function ModelPicker({ value, onChange, onSwitch, provider, idleCompact }
       if (mine) return onChange({ ...value, model: id })
       onSwitch?.(p, { model: id, effort: '', ultracode: false, chrome: false })
     }
-    const def = defaultOf(p)
-    // One page at a time, each as tall as its own rows (the panel scrolls
-    // past its max height); the one not on show is out of the layout and
-    // inert (no focus, no arrows).
+    const v: Choice = mine ? value : { model: '', effort: '', ultracode: false, chrome: false }
+    const set = (c: Choice) => (mine ? onChange(c) : onSwitch?.(p, c))
+    const all = lists[p]
+    const first = firstOf(all, mine ? value.model : '')
+    const rows = more[p] ? all : first
+    // Both pages lie in one cell of a grid, the one not on show hidden and
+    // inert, so the panel is as tall as the taller page and never jumps as
+    // the page turns.
     const tabbed = onSwitch ? { role: 'tabpanel', 'aria-labelledby': `${uid}-${p}-tab` } : {}
     return (
       <div
@@ -202,38 +231,28 @@ export function ModelPicker({ value, onChange, onSwitch, provider, idleCompact }
             {/* A pick keeps the panel open: the effort is often set in the
                 same visit, as in the VS Code picker. */}
             <div role="listbox" aria-label={`${name} model`}>
-              {[{ id: '', label: 'Default (recommended)', desc: def ? labelOf(p, def) : `From your ${name} settings` }, ...lists[p]].map((m) => (
-                <MenuOption key={m.id || 'default'} on={mine && value.model === m.id} label={m.label} desc={m.desc} onPick={() => pick(m.id)} />
-              ))}
+              <MenuOption stacked on={mine && value.model === ''} label="Default" desc={defaultCaption(p)} onPick={() => pick('')} />
+              {rows.map((m) => {
+                const r = rowOf(m.label, m.desc)
+                return <MenuOption stacked key={m.id} on={mine && value.model === m.id} label={r.name} desc={r.caption} onPick={() => pick(m.id)} />
+              })}
+              {first.length < all.length && (
+                <button type="button" data-item className={cn('picker-row more-models', menuItem, 'pointer-coarse:px-3')} aria-expanded={!!more[p]} onClick={() => setMore({ ...more, [p]: !more[p] })}>
+                  <ChevronDownIcon sm />
+                  {more[p] ? 'Fewer models' : `More models (${all.length - first.length})`}
+                </button>
+              )}
             </div>
-            {mine && settings()}
+            {settings(p, v, set)}
           </>
         )}
       </div>
     )
   }
 
-  // Each page has its own height, and the panel grows and shrinks from its
-  // top (it hangs above the chip), so the switch would move as the page
-  // turns. A mouse click keeps the panel's height until the pointer leaves
-  // the switch, so it never slides away under the pointer (and a second
-  // click lands on a tab, not a model). Taps and keys turn at once.
-  const held = useRef<HTMLElement | null>(null)
-  const viaMouse = useRef(false)
-  const hold = (panel: HTMLElement) => {
-    if (held.current === panel) return
-    panel.style.height = panel.getBoundingClientRect().height + 'px' // border-box
-    held.current = panel
-  }
-  const release = () => {
-    if (held.current) held.current.style.height = ''
-    held.current = null
-  }
   // Turning the page: from the top of the list, and the focus on its tab.
   const turn = (p: Agent, focus = false) => {
     const panel = tabs.current[p]?.closest<HTMLElement>('.picker-panel')
-    if (panel && viaMouse.current && p !== page) hold(panel)
-    viaMouse.current = false
     setPage(p)
     if (panel) panel.scrollTop = 0
     if (focus) tabs.current[p]?.focus()
@@ -250,9 +269,9 @@ export function ModelPicker({ value, onChange, onSwitch, provider, idleCompact }
   return (
     <PopMenu
       className="model-menu"
+      sheetTitle="Model and settings"
       label={`Model and settings: ${who}, ${chip}${extras.length ? ', ' + extras.join(', ') : ''}`}
       onOpen={() => {
-        release()
         setPage(current)
         refreshConfig() // in the background; the panel shows what it has
       }}
@@ -260,9 +279,8 @@ export function ModelPicker({ value, onChange, onSwitch, provider, idleCompact }
         <>
           <AgentIcon provider={current} size={12} />
           {chip}
-          {value.ultracode && !codex && <span className="ultra-dot" title="Ultracode on" />}
           {value.chrome && !codex && (
-            <span className="chip-chrome" title="Chrome on">
+            <span className="chip-chrome">
               <GlobeIcon />
             </span>
           )}
@@ -272,8 +290,8 @@ export function ModelPicker({ value, onChange, onSwitch, provider, idleCompact }
       {onSwitch ? (
         <div className="picker-paged" onKeyDown={onKey}>
           {/* Pinned atop the panel while a page scrolls (a phone's). */}
-          <div className="picker-tabs" onPointerLeave={release}>
-            <div className="picker-seg" role="tablist" aria-label="Agent">
+          <div className="picker-tabs">
+            <div className={cn('picker-seg', segList, 'flex w-full')} role="tablist" aria-label="Agent">
               {agents.map((p) => (
                 <button
                   key={p}
@@ -288,8 +306,7 @@ export function ModelPicker({ value, onChange, onSwitch, provider, idleCompact }
                   tabIndex={page === p ? 0 : -1}
                   data-item
                   data-agent={p}
-                  className={'picker-tab' + (page === p ? ' on' : '')}
-                  onPointerDown={(e) => (viaMouse.current = e.pointerType === 'mouse')}
+                  className={cn('picker-tab', segItem, page === p && 'on')}
                   onClick={() => turn(p)}
                 >
                   <AgentIcon provider={p} size={12} />

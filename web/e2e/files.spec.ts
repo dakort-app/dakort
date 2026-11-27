@@ -5,7 +5,7 @@ import { closeOpened, openSession, seedTabs, tabsKey, token, opened, type Sessio
 test.skip(!token, 'DAKORT_TOKEN not set')
 test.afterEach(closeOpened)
 
-// The explorer lists newest first until A–Z is picked, remembered on the
+// The explorer lists newest first until Name is picked, remembered on the
 // device. Folders come first either way.
 test('the explorer sorts by date or by name', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'the explorer is a drawer on a phone')
@@ -25,16 +25,29 @@ test('the explorer sorts by date or by name', async ({ page }, info) => {
   await openSession(page, (l) => l.find((s) => s.id === pick!.id) ?? l[0])
   const panel = page.locator('.explorer-panel')
   await panel.locator('.tree-row').first().waitFor()
-  await expect(panel.locator('.files-sort .chip-btn.on')).toHaveText('Recent')
+  // The sort is an icon on the header's right with a menu of two orders.
+  const sortBy = async (name: string) => {
+    await panel.getByRole('button', { name: 'Sort', exact: true }).click()
+    await page.getByRole('menuitemradio', { name, exact: true }).click()
+    await expect(page.getByRole('menu')).toHaveCount(0)
+  }
+  const checked = async () => {
+    await panel.getByRole('button', { name: 'Sort', exact: true }).click()
+    const on = await page.locator('[role=menuitemradio][aria-checked=true]').textContent()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('menu')).toHaveCount(0)
+    return on
+  }
+  expect(await checked()).toBe('Recent')
   const files = () => panel.locator('.tree-row:not(:has(svg)) .ellipsis').allTextContents()
-  await panel.locator('.files-sort').getByRole('button', { name: 'A–Z' }).click()
+  await sortBy('Name')
   const named = await files()
   const lower = (s: string) => s.toLowerCase()
   expect(named).toEqual([...named].sort((a, b) => (lower(a) < lower(b) ? -1 : lower(a) > lower(b) ? 1 : 0))) // the server's order
   expect(await page.evaluate(() => localStorage.getItem('dakort.filesSort'))).toBe('name')
   await page.screenshot({ path: 'test-results/explorer-sort.png' })
-  await panel.locator('.files-sort').getByRole('button', { name: 'Recent' }).click()
-  await expect(panel.locator('.files-sort .chip-btn.on')).toHaveText('Recent')
+  await sortBy('Recent')
+  expect(await checked()).toBe('Recent')
 })
 
 // A right-click on a file asks before deleting it; Undo puts it back. The
@@ -69,7 +82,7 @@ test('a file is deleted from the explorer, with Undo', async ({ page }, info) =>
   const panel = page.locator('.explorer-panel')
   const row = panel.locator('.tree-row', { hasText: name })
   await row.click({ button: 'right' })
-  const ask = page.getByRole('dialog', { name: 'Delete file' })
+  const ask = page.getByRole('dialog', { name: `Delete ${name}` })
   await expect(ask).toContainText(`Delete ${name}?`)
   // Keep it: nothing is sent.
   await ask.getByRole('button', { name: 'Keep it' }).click()
@@ -118,7 +131,9 @@ test('a CSV file shows as a table', async ({ page }, info) => {
 
   // Far down: those rows drawn, the header still at the top of the box.
   const box = page.locator('.csv-box')
-  await box.evaluate((b) => (b.scrollTop = 26 * 3000))
+  // Rows are 26 px, 32 on a touch screen (CsvView's rowH).
+  const rowH = await table.locator('tbody td').first().evaluate((el) => Math.round(el.getBoundingClientRect().height))
+  await box.evaluate((b, h) => (b.scrollTop = h * 3000), rowH)
   await expect(table.locator('tbody td', { hasText: 'Smith, row 3005' })).toBeVisible()
   const top = (await box.boundingBox())!.y
   expect(Math.abs((await table.locator('thead th').nth(1).boundingBox())!.y - top)).toBeLessThan(2)
@@ -130,12 +145,23 @@ test('a CSV file shows as a table', async ({ page }, info) => {
   await expect(table).toBeVisible()
 })
 
+// A file bar's action: its button, or on a narrow screen the row of its ⋯
+// menu that holds it.
+async function headAct(page: Page, name: string) {
+  const head = page.locator('.file-head')
+  const b = head.getByRole('button', { name, exact: true })
+  if (await b.isVisible()) return b.click()
+  await head.getByRole('button', { name: 'More' }).click()
+  await page.getByRole('menuitem', { name, exact: true }).click()
+}
+
 // Editing a text file: the source is editable at once on a laptop, after
 // Edit on a phone. Save and Revert show only with changes; Ctrl+S sends
 // the text with the version it was edited from; a change on disk is taken
 // in while nothing is typed, and with typing pending a refused save offers
 // Reload and Overwrite. Not UTF-8: read-only. Served by the test, so
 // nothing is written.
+
 test('a text file can be edited and saved', async ({ page }) => {
   const touch = await page.evaluate(() => matchMedia('(pointer: coarse)').matches)
   const s = await openSession(page, (l) => l[0])
@@ -175,17 +201,18 @@ test('a text file can be edited and saved', async ({ page }) => {
   await expect(content).toContainText('first line')
   await expect(content).toHaveAttribute('contenteditable', 'true')
   await expect(head.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0)
-  await expect(head.getByRole('link', { name: 'Download' })).toBeVisible()
+  // (On a phone, while editing, Download is in the ⋯ menu.)
+  await expect(touch ? head.getByRole('button', { name: 'More' }) : head.getByRole('link', { name: 'Download' })).toBeVisible()
   await content.click()
   await page.keyboard.press('ControlOrMeta+End')
   await page.keyboard.type('added\n')
-  await expect(head).toContainText('•')
-  await expect(head.getByRole('button', { name: 'Revert' })).toBeVisible()
+  await expect(head.locator('.crumb-dirty')).toHaveCount(1) // the unsaved dot
+  await expect(head.getByRole('button', { name: touch ? 'More' : 'Revert' })).toBeVisible()
   await expect(head.getByRole('button', { name: 'Preview' })).toHaveCount(0) // the typing stays on screen
   await page.keyboard.press('ControlOrMeta+s')
   await expect.poll(() => saves.length).toBe(1)
   expect(saves[0]).toEqual({ text: '# Notes\n\nfirst line\nadded\n', base: '"v1"' })
-  await expect(head).not.toContainText('•')
+  await expect(head.locator('.crumb-dirty')).toHaveCount(0)
   await expect(head.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0)
 
   // Changed on disk with nothing typed: taken in.
@@ -210,19 +237,28 @@ test('a text file can be edited and saved', async ({ page }) => {
   await content.click()
   await page.keyboard.press('ControlOrMeta+End')
   await page.keyboard.type('scrap')
-  await head.getByRole('button', { name: 'Revert' }).click()
+  // Revert asks first, in the app's own dialog (it was the browser's
+  // confirm); the action has the focus, so Enter confirms.
+  await headAct(page, touch ? 'Revert to the saved file' : 'Revert')
+  const revertAsk = page.getByRole('alertdialog', { name: 'Revert to the saved file?' })
+  await expect(revertAsk).toBeVisible()
+  await expect(revertAsk.getByRole('button', { name: 'Revert' })).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(revertAsk).toHaveCount(0)
   await expect(content).not.toContainText('scrap')
-  await expect(head).not.toContainText('•')
+  await expect(head.locator('.crumb-dirty')).toHaveCount(0)
 
   // On a phone, Done with unsaved typing asks first.
   if (touch) {
     await content.click()
     await page.keyboard.type('x')
-    page.once('dialog', (d) => d.dismiss())
+    const discard = page.getByRole('alertdialog', { name: 'Discard your unsaved changes?' })
     await head.getByRole('button', { name: 'Done' }).click()
+    await discard.getByRole('button', { name: 'Cancel' }).click()
+    await expect(discard).toHaveCount(0)
     await expect(head.getByRole('button', { name: 'Done' })).toBeVisible()
-    page.once('dialog', (d) => d.accept())
     await head.getByRole('button', { name: 'Done' }).click()
+    await discard.getByRole('button', { name: 'Discard' }).click()
     await expect(head.getByRole('button', { name: 'Edit' })).toBeVisible()
   }
 
@@ -336,6 +372,7 @@ test('an HTML file opens outside the app', async ({ page }) => {
   const s = await openSession(page, (l) => l[0])
   const html = '<h1>Report</h1><script>document.title="ran"</script>'
   let local = false
+  let fail = false
   const opened: string[] = []
   await page.route('**/api/here', (route) => route.fulfill({ json: { local } }))
   await page.route(/\/api\/files\/(stat|raw|open)\?/, (route) => {
@@ -343,6 +380,7 @@ test('an HTML file opens outside the app', async ({ page }) => {
     if (u.searchParams.get('path') !== 'madetest-report.html') return route.fallback()
     if (u.pathname.endsWith('/open')) {
       opened.push(u.searchParams.get('path')!)
+      if (fail) return route.fulfill({ status: 500, json: { error: 'madetest: no browser here' } })
       return route.fulfill({ json: { ok: true } })
     }
     if (u.pathname.endsWith('/stat')) return route.fulfill({ json: { size: html.length, mtime: '2026-11-07T00:00:00Z' } })
@@ -361,6 +399,18 @@ test('an HTML file opens outside the app', async ({ page }) => {
   await page.locator('.file-head').getByRole('button', { name: 'Open in browser' }).click()
   await expect.poll(() => opened).toEqual(['madetest-report.html'])
   await expect(page.locator('.file-head a', { hasText: 'Open in new tab' })).toHaveCount(0)
+
+  // A failure is said under the bar in words, announced, with the reason
+  // (on a phone the button is only an icon); Try again asks again.
+  fail = true
+  await page.locator('.file-head').getByRole('button', { name: 'Open in browser' }).click()
+  const problem = page.getByRole('alert').filter({ hasText: 'Could not open madetest-report.html.' })
+  await expect(problem).toContainText('madetest: no browser here')
+  await expect(problem).toBeInViewport()
+  fail = false
+  await problem.getByRole('button', { name: 'Try again' }).click()
+  await expect(problem).toHaveCount(0)
+  expect(opened).toHaveLength(3)
 })
 
 // An OpenDocument spreadsheet is not shown (.xlsx is, see the Excel check):
@@ -428,6 +478,19 @@ test('an archive lists its contents', async ({ page }) => {
   await rows.nth(1).click()
   await expect(rows).toHaveCount(5)
   await expect(rows.nth(2)).toContainText('main.go')
+  // From the keyboard too: a folder takes focus, Enter folds it, ← closes
+  // it and Space opens it again. A file row takes no focus.
+  await rows.nth(1).focus()
+  await expect(rows.nth(1)).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(rows).toHaveCount(3)
+  await page.keyboard.press('ArrowRight')
+  await expect(rows).toHaveCount(5)
+  await page.keyboard.press('ArrowLeft')
+  await expect(rows).toHaveCount(3)
+  await page.keyboard.press(' ')
+  await expect(rows).toHaveCount(5)
+  await expect(rows.nth(2)).not.toHaveAttribute('tabindex')
   await rows.nth(0).click()
   await expect(rows).toHaveCount(1)
 })
@@ -515,8 +578,14 @@ test('a Word file shows as pages', async ({ page }, info) => {
 
   // Zoom in past the width, and Fit back to it.
   const bar = page.locator('.pdf-bar')
-  await bar.getByRole('button', { name: 'Zoom in' }).click()
-  await bar.getByRole('button', { name: 'Zoom in' }).click()
+  // On a phone zoom is in the ⋯ menu.
+  const zoomIn = async () => {
+    if (await bar.getByRole('button', { name: 'Zoom in' }).isVisible()) return bar.getByRole('button', { name: 'Zoom in' }).click()
+    await bar.getByRole('button', { name: 'More' }).click()
+    await page.getByRole('menuitem', { name: 'Zoom in' }).click()
+  }
+  await zoomIn()
+  await zoomIn()
   await expect.poll(async () => (await pages.first().boundingBox())!.width).toBeGreaterThan(first.width * 1.3)
   await bar.getByRole('button', { name: 'Fit' }).click()
   await expect.poll(async () => Math.round((await pages.first().boundingBox())!.width)).toBe(Math.round(first.width))
@@ -637,7 +706,7 @@ test('a PDF fits the page and finds words', async ({ page }, info) => {
   await expect(page.locator('.pdf-find')).toContainText('1 / 3')
   await box.fill('haystack')
   await box.press('Enter')
-  await expect(page.locator('.pdf-find')).toContainText('no matches')
+  await expect(page.locator('.pdf-find')).toContainText('No matches')
   await box.press('Escape')
   await expect(page.locator('.pdf-find')).toHaveCount(0)
   await expect(page.locator('.pdf-hit')).toHaveCount(0)
@@ -657,10 +726,10 @@ test('the explorer keeps its shown or hidden state across a folder switch', asyn
   test.skip(!second, 'needs a session in a second folder')
   await page.request.post('/api/folders/open', { data: { path: second!.folder } })
   opened.push(second!.folder!)
-  await page.getByRole('button', { name: 'Hide the sidebar' }).click()
+  await page.getByRole('button', { name: 'Hide the sidebar', exact: true }).click()
   await page.reload()
   await expect(page.locator('.explorer-panel')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Show the sidebar' }).click()
+  await page.getByRole('button', { name: 'Show the sidebar', exact: true }).click()
   const other = page.locator('.folder-list .folder-row:not(.on):not(.more)').first()
   await other.click()
   await page.waitForURL((u) => !decodeURIComponent(u.hash).endsWith(s.folder!))
@@ -683,12 +752,12 @@ test('the phone drawer keeps its open folders after a file opens', async ({ page
   })
   await serveNotes(page, name)
   await openSession(page, (l) => l[0])
-  await page.getByRole('button', { name: 'Show the sidebar' }).click()
+  await page.getByRole('button', { name: 'Show the sidebar', exact: true }).click()
   const panel = page.locator('.explorer-panel')
   await panel.locator('.tree-row', { hasText: dir }).click()
   await panel.locator('.tree-row', { hasText: 'madetest-notes.md' }).click()
   await expect(panel).toHaveCount(0)
-  await page.getByRole('button', { name: 'Show the sidebar' }).click()
+  await page.getByRole('button', { name: 'Show the sidebar', exact: true }).click()
   await expect(panel.locator('.tree-row', { hasText: 'madetest-notes.md' })).toBeVisible()
 })
 
@@ -822,12 +891,13 @@ test('the explorer resizes by dragging', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop', 'the explorer is a drawer on a phone')
   await openSession(page, (l) => l[0])
   const panel = page.locator('.explorer-panel')
-  await panel.locator('.explorer [title]').first().waitFor() // laid out before measuring
+  await panel.locator('.explorer .tree-row').first().waitFor() // laid out before measuring
   const w0 = (await panel.boundingBox())!.width
   const bar = (await page.locator('.splitter').boundingBox())!
   await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2)
   await page.mouse.down()
-  await page.mouse.move(bar.x + 300, bar.y + bar.height / 2, { steps: 5 })
+  // 300 px from where it was taken (the bar is wider than it was).
+  await page.mouse.move(bar.x + bar.width / 2 + 300, bar.y + bar.height / 2, { steps: 5 })
   await page.mouse.up()
   // Measured at once: the width must follow the mouse without waiting for
   // a render (a render per move used to lag, half the runs read 280 here).
@@ -880,4 +950,167 @@ test('a table keeps its short columns whole on a phone', async ({ page }, info) 
   expect(lines.format).toBe(1)
   expect(lines.effort).toBe(1)
   expect(lines.approach).toBeGreaterThanOrEqual(14)
+})
+
+// On a phone the bars over a file are one row of 44 px buttons, none of
+// them within 8 px of the screen's edge, and the path gives way instead:
+// a long path keeps the file's name, and the whole path is in its tip.
+// The PDF's bar too, where the page count and "Fit page" once wrapped onto
+// two lines each.
+test("a file's toolbar keeps its buttons whole and on screen on a phone", async ({ page }) => {
+  test.skip(!(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)), 'touch targets are a phone question')
+  const s = await openSession(page, (l) => l[0])
+  const md = 'madetest-folder/madetest-a-rather-long-folder-name/madetest-notes.md'
+  const pdf = 'madetest-sample.pdf'
+  const pdfBody = readFileSync(new URL('sample.pdf', import.meta.url))
+  await page.route(/\/api\/files\/(stat|raw)\?/, (route) => {
+    const u = new URL(route.request().url())
+    const p = u.searchParams.get('path')
+    const body = p === md ? '# Notes\n\nfirst line\n' : p === pdf ? pdfBody : null
+    if (body === null) return route.fallback()
+    if (u.pathname.endsWith('/stat')) return route.fulfill({ json: { size: body.length, mtime: '2026-11-20T00:00:00Z', complete: true } })
+    return route.fulfill({ body, contentType: p === pdf ? 'application/pdf' : 'application/octet-stream', headers: { ETag: '"m"' } })
+  })
+  const check = async (bar: string, names: string[]) => {
+    const vw = page.viewportSize()!.width
+    const boxes = []
+    for (const n of names) {
+      const b = (await page.locator(bar).getByRole(n === 'Download' ? 'link' : 'button', { name: n, exact: true }).boundingBox())!
+      expect(b.width, n).toBeGreaterThanOrEqual(44)
+      expect(b.height, n).toBeGreaterThanOrEqual(44)
+      expect(b.x, n).toBeGreaterThanOrEqual(8)
+      expect(b.x + b.width, n).toBeLessThanOrEqual(vw - 8)
+      boxes.push(b)
+    }
+    // One row: every button on the same line.
+    expect(new Set(boxes.map((b) => Math.round(b.y))).size).toBe(1)
+  }
+
+  await seedTabs(page, s.folder!, { ids: [s.id, 'f:' + md], active: 'f:' + md })
+  await page.reload()
+  await expect(page.locator('.file-md')).toContainText('first line')
+  await check('.file-head', ['Edit', 'Source', 'Download'])
+  const crumb = page.locator('.file-head .crumb')
+  await expect(crumb).toHaveAttribute('data-tip', md)
+  // The name is whole; the folders gave way.
+  expect(await crumb.locator('.crumb-name').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+  await page.locator('.file-head').getByRole('button', { name: 'Source' }).click()
+  // Beside the switch, Find and Download are in the ⋯ menu on a phone.
+  await check('.file-head', ['Edit', 'Preview', 'More'])
+  // Find in the source: the same one-row bar as a PDF's, its box 16 px
+  // (iOS zooms on less).
+  await expect(page.locator('.cm-content')).toContainText('first line')
+  await headAct(page, 'Find')
+  await expect(page.locator('.code-find input')).toBeFocused()
+  expect(await page.locator('.code-find input').evaluate((el) => getComputedStyle(el).fontSize)).toBe('16px')
+  await page.keyboard.type('line')
+  await page.keyboard.press('Enter')
+  await expect(page.locator('.code-find .find-count')).toHaveText('1 / 1')
+  // The box has the first row to itself but for close; the rest below.
+  await check('.code-find', ['Match case', 'Whole words', 'Previous match', 'Next match'])
+  await check('.code-find', ['Close find'])
+  expect((await page.locator('.code-find input').boundingBox())!.width).toBeGreaterThan(250)
+
+  await seedTabs(page, s.folder!, { ids: [s.id, 'f:' + pdf], active: 'f:' + pdf })
+  await page.reload()
+  await expect(page.locator('.pdf-page')).toHaveCount(3)
+  // Download and Source are in the ⋯ menu on a phone, so the name has room
+  // beside Find and zoom; the page count floats over the pages.
+  await check('.pdf-bar', ['Find', 'Zoom out', 'Fit page', 'Zoom in', 'More'])
+  // Room for a name of a dozen characters or more (this one has 19).
+  expect(await page.locator('.pdf-bar .crumb-name').evaluate((el) => el.clientWidth)).toBeGreaterThanOrEqual(100)
+  await expect(page.locator('.pdf-count-float')).toHaveText('p. 1 / 3')
+  await page.locator('.pdf-bar').getByRole('button', { name: 'More' }).click()
+  await expect(page.getByRole('menuitem', { name: 'Download' })).toBeVisible()
+  // Picking a spot from the menu says so, with a way out.
+  await page.getByRole('menuitem', { name: 'Source: tap a spot' }).click()
+  await expect(page.locator('.sync-note')).toContainText('Tap a spot')
+  await page.locator('.sync-note').getByRole('button', { name: 'Cancel' }).click()
+  await expect(page.locator('.sync-note')).toHaveCount(0)
+  const count = (await page.locator('.pdf-count-float').boundingBox())!
+  expect(count.height).toBeLessThan(30) // "1 / 3" on one line (a pill with its padding)
+})
+
+// On a phone a Word file at Fit and a CSV wider than the screen scroll no
+// further than their content: the Word page was scaled with a transform
+// that left its unscaled width as scroll room (476 px of empty grey), and
+// a CSV's last column took all the spare width (636 px of blank cells
+// under no header).
+test('a Word file at Fit and a wide CSV scroll no further than their content on a phone', async ({ page }) => {
+  test.skip(!(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)), 'a phone question')
+  const s = await openSession(page, (l) => l[0])
+  const docx = 'madetest-sample.docx'
+  const csv = 'madetest-wide.csv'
+  const docxBody = readFileSync(new URL('sample.docx', import.meta.url))
+  const note = 'a long note that runs on well past the width of any phone screen, and then some more words'
+  const csvBody = 'id,customer,region,notes\n1,Acme Tools,North,' + note + '\n2,Birch Labs,South,ok\n'
+  await page.route(/\/api\/files\/(stat|raw)\?/, (route) => {
+    const u = new URL(route.request().url())
+    const p = u.searchParams.get('path')
+    const body = p === docx ? docxBody : p === csv ? csvBody : null
+    if (body === null) return route.fallback()
+    if (u.pathname.endsWith('/stat')) return route.fulfill({ json: { size: body.length, mtime: '2026-11-20T00:00:00Z' } })
+    return route.fulfill({ body, contentType: 'application/octet-stream' })
+  })
+  await seedTabs(page, s.folder!, { ids: [s.id, 'f:' + docx], active: 'f:' + docx })
+  await page.reload()
+  await page.locator('.file-docx section.docx').first().waitFor()
+  await expect.poll(() => page.locator('.file-docx').evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+
+  await seedTabs(page, s.folder!, { ids: [s.id, 'f:' + csv], active: 'f:' + csv })
+  await page.reload()
+  const box = page.locator('.csv-box')
+  await expect(box.locator('tbody tr')).toHaveCount(2)
+  const m = await box.evaluate((el) => {
+    const t = el.querySelector('table')!.getBoundingClientRect()
+    const ths = [...el.querySelectorAll('thead th')].map((th) => th.getBoundingClientRect())
+    return { scroll: el.scrollWidth, table: Math.round(t.width), last: Math.round(ths.at(-1)!.width), fits: [...el.querySelectorAll('tbody tr:first-child td')].slice(0, 4).every((td) => td.scrollWidth <= td.clientWidth) }
+  })
+  expect(m.scroll).toBeLessThanOrEqual(m.table + 1) // nothing past the table
+  expect(m.last).toBeLessThan(page.viewportSize()!.width) // no column wider than the screen
+  expect(m.fits).toBe(true) // the short cells are whole: the row number, id, customer and region
+
+  // On a 360 px phone, swiped to the end: no column starts under the pinned
+  // row numbers (a column capped at 42 characters once began 28 px under
+  // them, its header reading 'tes').
+  await page.setViewportSize({ width: 360, height: 780 })
+  await box.evaluate((el) => (el.scrollLeft = el.scrollWidth))
+  await page.waitForTimeout(200)
+  const end = await box.evaluate((el) => {
+    const rn = el.querySelector('thead th.rn')!.getBoundingClientRect()
+    const ths = [...el.querySelectorAll('thead th:not(.rn)')].map((th) => th.getBoundingClientRect())
+    // The last column's start, and the widest column against the room beside the row numbers.
+    return { gap: ths.at(-1)!.left - rn.right, widest: Math.max(...ths.map((r) => r.width)), room: el.clientWidth - rn.width }
+  })
+  expect(end.gap).toBeGreaterThanOrEqual(0)
+  expect(end.widest).toBeLessThanOrEqual(end.room)
+})
+
+// A CSV cell cut short by its column shows its whole text on a tap (a
+// phone shows no title).
+test('a cut CSV cell shows its whole text on a tap', async ({ page }) => {
+  test.skip(!(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)), 'a phone question')
+  const s = await openSession(page, (l) => l[0])
+  const csv = 'madetest-cut.csv'
+  const note = 'Asked for an invoice in EUR and a second seat for the new hire next month'
+  const body = 'id,notes,active_customers_at_end_of_week_after_churn\n1,' + note + ',120\n2,ok,95\n'
+  await page.route(/\/api\/files\/(stat|raw)\?/, (route) => {
+    const u = new URL(route.request().url())
+    if (u.searchParams.get('path') !== csv) return route.fallback()
+    if (u.pathname.endsWith('/stat')) return route.fulfill({ json: { size: body.length, mtime: '2026-11-20T00:00:00Z' } })
+    return route.fulfill({ body, contentType: 'text/csv' })
+  })
+  await page.setViewportSize({ width: 360, height: 780 })
+  await seedTabs(page, s.folder!, { ids: [s.id, 'f:' + csv], active: 'f:' + csv })
+  await page.reload()
+  const cut = page.locator('.csv-table tbody td', { hasText: 'Asked for' })
+  await expect(cut).toHaveAttribute('data-tip-tap', '')
+  await expect(page.locator('.csv-table tbody td', { hasText: /^ok$/ })).not.toHaveAttribute('data-tip')
+  await cut.tap()
+  await expect(page.locator('.tip[data-open]')).toContainText(note)
+  // A long header over short numbers: the column is sized by its numbers,
+  // the header cut with its tap-to-read (it was a 328 px column).
+  const long = page.locator('.csv-table thead th', { hasText: 'active_customers' })
+  expect((await long.boundingBox())!.width).toBeLessThan(150)
+  await expect(long).toHaveAttribute('data-tip-tap', '')
 })

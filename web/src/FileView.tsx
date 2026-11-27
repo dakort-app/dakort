@@ -1,9 +1,18 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { AuthError, getJSON, HTTPError, postJSON } from './api'
 import { Markdown } from './Markdown'
 import { DiffView } from './DiffView'
-import { diffTaken, markOf, useDiffAsk, useGit } from './git'
+import { diffTaken, markOf, useDiffAsk, useGit, type DiffSide } from './git'
 import { isRelative, join } from './mdrender'
+import { DiffIcon, DownloadIcon, EditIcon, FindIcon, OpenIcon, PictureIcon, PreviewIcon, RevertIcon, SourceIcon, TableIcon } from './viewicons'
+import { ToolMenu, type MenuTool } from './ToolMenu'
+import { Problem } from './OpenFolder'
+import { Button } from '@/components/ui/button'
+import { ask } from './ask'
+import { toolClass } from '@/lib/tool'
+import { cn } from '@/lib/utils'
+import { isMac } from './keys'
+import { segItem, segList } from '@/lib/seg'
 
 // CodeMirror and pdf.js load with the first file that needs them, not
 // with the app.
@@ -28,20 +37,29 @@ export const extOf = (path: string) => (path.split('.').pop() ?? '').toLowerCase
 // blocks inside it that is (a list is one block; the reader is at one of
 // its items), and so on in.
 function topLine(box: HTMLElement | null): number | null {
+  return topPlace(box)?.line ?? null
+}
+// topPlace is topLine with how far into that block the preview is
+// scrolled (px above the content's top edge), so a reload puts the reader
+// back to the pixel, not only at the block's start.
+function topPlace(box: HTMLElement | null): { line: number; shift: number } | null {
   if (!box) return null
-  const edge = box.getBoundingClientRect().top + 1
+  const top = box.getBoundingClientRect().top
+  const edge = top + 1
   let best: HTMLElement | null = null
   for (const el of box.querySelectorAll<HTMLElement>('[data-line]')) {
     if (el.getBoundingClientRect().bottom <= edge) continue
     if (best && !best.contains(el)) break
     best = el
   }
-  return best ? Number(best.dataset.line) : null
+  if (!best) return null
+  const pad = parseFloat(getComputedStyle(box).paddingTop) || 0
+  return { line: Number(best.dataset.line), shift: top + pad - best.getBoundingClientRect().top }
 }
 
 // Scrolls a Markdown preview so the block that starts at line, or the
 // last one starting before it, is at the top.
-function showLine(box: HTMLElement, line: number) {
+function showLine(box: HTMLElement, line: number, shift = 0) {
   let best: HTMLElement | null = null
   for (const el of box.querySelectorAll<HTMLElement>('[data-line]')) {
     const n = Number(el.dataset.line)
@@ -49,7 +67,7 @@ function showLine(box: HTMLElement, line: number) {
   }
   if (!best) return
   const pad = parseFloat(getComputedStyle(box).paddingTop) || 0
-  box.scrollTop += best.getBoundingClientRect().top - box.getBoundingClientRect().top - pad
+  box.scrollTop += best.getBoundingClientRect().top - box.getBoundingClientRect().top - pad + (Number(best.dataset.line) === line ? shift : 0)
 }
 
 // A file tab: Markdown rendered and CSV as a table (each with a Source
@@ -60,13 +78,95 @@ function showLine(box: HTMLElement, line: number) {
 export const fileURL = (kind: 'list' | 'raw' | 'stat' | 'open' | 'archive' | 'save' | 'delete', root: string, path: string) =>
   `/api/files/${kind}?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`
 
+// The command key as the tips name it: ⌘ on a Mac, Ctrl elsewhere.
+export const mod = isMac ? '⌘' : 'Ctrl+'
+
+// A toolbar button of the file views: an icon, its name in aria-label and
+// in the tip (a word or three; tip is kept for callers, not shown), and the name as text too
+// where the pane is wide (.lbl, styles.css). 44 px on a touch screen.
+type ToolProps = {
+  label: string
+  tip?: string
+  icon: ReactNode
+  on?: boolean // a switch that is on (Find open, Source picking): aria-pressed
+  text?: boolean // the name shows at any width (Save)
+  className?: string
+  keys?: string // its shortcut, shown in the tip as a key chip (keys.ts)
+} & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className'>
+export function Tool({ label, tip: _tip, icon, on, text, className, keys, type = 'button', ...rest }: ToolProps) {
+  return (
+    <button
+      type={type}
+      className={toolClass({ on, text, primary: /(^| )primary( |$)/.test(className ?? ''), secondary: /(^| )secondary( |$)/.test(className ?? ''), className: className?.replace(/(^| )(primary|secondary)(?= |$)/g, '') })}
+      aria-label={label}
+      aria-pressed={on}
+      data-tip={label}
+      data-tip-key={keys}
+      {...rest}
+    >
+      {icon}
+      <span className="lbl" data-label={label}>
+        {label}
+      </span>
+    </button>
+  )
+}
+
+// The path as a breadcrumb: the folders in --text-2, the file's name in
+// full text colour. In a narrow pane only the parent folder shows (after
+// "…/"). The whole path is in its tip, a tap away on a phone.
+export function Crumb({ path, dirty }: { path: string; dirty?: boolean }) {
+  const parts = path.split('/')
+  const name = parts.pop()!
+  const parent = parts.pop()
+  // Folders show whole or not at all: when the path does not fit, the
+  // folders above the parent go (data-tight 1), then the parent too (2),
+  // and only then is the name itself cut. A folder cut to a stub ("d…")
+  // said nothing.
+  const box = useRef<HTMLSpanElement>(null)
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el) return
+    const fit = () => {
+      for (const level of ['', '1', '2']) {
+        if (level) el.dataset.tight = level
+        else delete el.dataset.tight
+        // By the drawn edges, not scrollWidth's whole pixels, which let a
+        // name lose its last letter under a 1 px tolerance.
+        const end = el.lastElementChild?.getBoundingClientRect().right ?? 0
+        if (level === '2' || end <= el.getBoundingClientRect().right + 0.25) break
+      }
+    }
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [path, dirty])
+  return (
+    <span className="crumb" ref={box} data-tip={path} data-tip-tap="">
+      {parts.length > 0 && <span className="crumb-dir crumb-up">{parts.join('/') + '/'}</span>}
+      {parent !== undefined && <span className={'crumb-dir crumb-parent' + (parts.length ? ' deep' : '')}>{parent + '/'}</span>}
+      <span className="crumb-name">{name}</span>
+      {dirty && (
+        <span className="crumb-dirty">
+          <span className="crumb-dot" aria-hidden="true" />
+          <span className="lbl">Unsaved</span>
+        </span>
+      )}
+    </span>
+  )
+}
+
+export const downloadURL = (root: string, path: string) => fileURL('raw', root, path) + '&download=1'
+
 // DownloadButton downloads the file as it is on disk, to the laptop's
 // Downloads or the phone's files. The server marks it an attachment too,
 // since a phone's browser would open a PDF in place despite download.
-export function DownloadButton({ root, path }: { root: string; path: string }) {
+export function DownloadButton({ root, path, className }: { root: string; path: string; className?: string }) {
   return (
-    <a className="btn small-btn" href={fileURL('raw', root, path) + '&download=1'} download={path.split('/').pop()} title="Download a copy of the file">
-      Download
+    <a className={toolClass({ className })} href={downloadURL(root, path)} download={path.split('/').pop()} aria-label="Download" data-tip="Download">
+      <DownloadIcon />
+      <span className="lbl">Download</span>
     </a>
   )
 }
@@ -90,31 +190,34 @@ function useLocal() {
 // the sheets above, matches officeExts in openlocal.go.
 const office = new Set(['xls', 'ods', 'numbers', 'pptx', 'ppt', 'odp', 'key', 'odt', 'doc', 'rtf'])
 
-function OpenButton({ root, path, html }: { root: string; path: string; html: boolean }) {
+function OpenButton({ root, path, html, onOpen }: { root: string; path: string; html: boolean; onOpen: () => void }) {
   const here = useLocal()
-  const [msg, setMsg] = useState('')
   if (here === null) return null
   if (!here) {
     if (!html) return null
     return (
-      <a className="btn small-btn" href={fileURL('raw', root, path) + '&html=1'} target="_blank" rel="noopener noreferrer" title="A plain view: no scripts, and pictures or styles in other files may be missing">
-        Open in new tab
+      <a
+        className={toolClass()}
+        href={fileURL('raw', root, path) + '&html=1'}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Open in new tab"
+        data-tip="Open in new tab"
+      >
+        <OpenIcon />
+        <span className="lbl">Open in new tab</span>
       </a>
     )
   }
+  // A failure shows under the bar, in words (FileView); the button stays
+  // itself, a way to try again.
   return (
-    <button
-      className="btn small-btn"
-      title={msg || (html ? "Open the page in this computer's browser" : 'Open the file with its program on this computer')}
-      onClick={() =>
-        postJSON(fileURL('open', root, path), {}).then(
-          () => setMsg(''),
-          (e) => setMsg(e instanceof Error ? e.message : String(e)),
-        )
-      }
-    >
-      {msg ? 'Could not open' : html ? 'Open in browser' : 'Open on the computer'}
-    </button>
+    <Tool
+      label={html ? 'Open in browser' : 'Open on the computer'}
+      tip={html ? "Open the page in this computer's browser" : 'Open the file with its program on this computer'}
+      icon={<OpenIcon />}
+      onClick={onOpen}
+    />
   )
 }
 
@@ -204,15 +307,20 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
   // Changes in the sidebar opens it, the Diff button turns it on and off.
   const git = useGit(root)
   const mark = ext === 'pdf' || ext === 'docx' ? '' : markOf(git, path, false)
-  const [diffOn, setDiff] = useState(false)
+  const [diffOn, setDiffOn] = useState(false)
+  const [side, setSide] = useState<DiffSide | undefined>()
+  const setDiff = (on: boolean, s?: DiffSide) => {
+    setDiffOn(on)
+    setSide(s)
+  }
   const asked = useDiffAsk()
   useEffect(() => {
     if (asked.key === root + '\n' + path && asked.n > diffTaken.n) {
       diffTaken.n = asked.n
-      setDiff(true)
+      setDiff(true, asked.side)
     }
   }, [asked])
-  const diff = diffOn && !!mark
+  const diff = diffOn && (!!mark || !!side) // a file changed only in commits not pushed has no mark
 
   // Preview and Source of a Markdown file meet at the same place. Each
   // block of the preview knows its source line (mdrender), the editor
@@ -220,13 +328,15 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
   // (startLine). mdLine is the line at the top of whichever view shows;
   // it also holds the preview's place when the file changes under it.
   const mdLine = useRef<number | null>(null)
+  const mdShift = useRef(0) // how far into that block the preview was scrolled
   const pos = useRef<(() => number) | null>(null)
   const toggleSource = () => {
     if (ext === 'md') mdLine.current = (source ? pos.current?.() : topLine(scroller.current)) ?? mdLine.current
+    mdShift.current = 0
     setSource(!source)
   }
   useLayoutEffect(() => {
-    if (ext === 'md' && !source && scroller.current && mdLine.current) showLine(scroller.current, mdLine.current)
+    if (ext === 'md' && !source && scroller.current && mdLine.current) showLine(scroller.current, mdLine.current, mdShift.current)
   }, [source, loaded])
 
   // Watch the file: a change in size or time means a reload.
@@ -316,11 +426,16 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
   // Phone only: Edit opens the source for editing, Done closes it.
   const startEdit = () => {
     if (ext === 'md' && !source) mdLine.current = topLine(scroller.current) ?? mdLine.current
+    mdShift.current = 0
     setSource(true) // Markdown, CSV and SVG are edited as source
     setPhoneEdit(true)
   }
-  const stopEdit = () => {
-    if (dirty && !confirm('Discard your unsaved changes?')) return
+  // Bumped whenever typing is dropped (Done after a discard, Revert), so the
+  // editor takes the file's text back even when it is the same string.
+  const [revision, setRevision] = useState(0)
+  const stopEdit = async () => {
+    if (dirty && !(await ask({ title: 'Discard your unsaved changes?', action: 'Discard', destructive: true }))) return
+    if (dirty) setRevision((r) => r + 1)
     setPhoneEdit(false)
     setEdit(null)
     setDirty(false)
@@ -349,53 +464,102 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
   const reload = () => {
     if (!text) return
     setEdit({ text: text.text, base: text.etag })
+    setRevision((r) => r + 1) // the editor takes the text back even if it is the same string
     setDirty(false)
     setConflict(false)
     setSaveErr('')
+  }
+  // Revert drops every unsaved edit: it asks first.
+  const revert = async () => {
+    if (await ask({ title: 'Revert to the saved file?', text: 'Your unsaved changes are dropped and the file is shown as it is on disk.', action: 'Revert', destructive: true })) reload()
   }
   const onEdit = () => {
     typed.current++
     setDirty(true)
   }
+  // Find, in the code view: CodeMirror's search panel (Ctrl+F does the
+  // same; a phone has no keys for it).
+  const find = useRef<(() => void) | null>(null)
+  const [finding, setFinding] = useState(false)
+  const codeShown = loaded?.kind === 'text' && !(ext === 'md' && !source) && !(tables.has(ext) && !source) && !(images.has(ext) && !(ext === 'svg' && source))
+  // A narrow bar (under 440 px, a phone) keeps the name, the switch, Edit,
+  // Done and Save, and puts the rest in a ⋯ menu (ToolMenu): Download,
+  // Revert, and Find while editing or beside the switch, where the name
+  // had 50 px ('App…').
+  const switchShown = !diff && !dirty && !phoneEdit && (ext === 'md' || ext === 'svg' || tables.has(ext))
+  const findInMenu = codeShown && (phoneEdit || switchShown)
+  const menu: MenuTool[] = [
+    ...(findInMenu ? [{ label: 'Find', icon: <FindIcon />, onPick: () => find.current?.() }] : []),
+    ...(dirty ? [{ label: 'Revert to the saved file', icon: <RevertIcon />, onPick: revert, danger: true }] : []),
+    ...(!dirty ? [{ label: 'Download', icon: <DownloadIcon />, href: downloadURL(root, path), download: path.split('/').pop() }] : []),
+  ]
+  // Open in browser / on the computer: a failure is said under the bar,
+  // announced, with the server's reason (on a phone the button is an icon).
+  // n counts the failures: each one mounts the note afresh, so a second
+  // failure is announced again. The note stays while a retry runs (its Try
+  // again keeps the focus); a retry that works hands the focus to the Open
+  // button of this view (another tab's view is in the page too).
+  const [openErr, setOpenErr] = useState<{ why: string; n: number } | null>(null)
+  const view = useRef<HTMLDivElement>(null)
+  // After the failed retry's note is mounted (an effect: a frame could
+  // come before the commit), its Try again takes the focus back.
+  const refocus = useRef(false)
+  useEffect(() => {
+    if (!refocus.current) return
+    refocus.current = false
+    view.current?.querySelector<HTMLElement>('.file-problem button')?.focus({ preventScroll: true })
+  }, [openErr?.n])
+  const openHere = () => {
+    const retrying = !!document.activeElement?.closest('.file-problem')
+    const focus = (sel: string) => requestAnimationFrame(() => view.current?.querySelector<HTMLElement>(sel)?.focus({ preventScroll: true }))
+    return postJSON(fileURL('open', root, path), {}).then(
+      () => {
+        setOpenErr(null)
+        if (retrying) focus('[aria-label^="Open "]')
+      },
+      (e) => {
+        refocus.current = retrying
+        setOpenErr((o) => ({ why: e instanceof Error ? e.message : String(e), n: (o?.n ?? 0) + 1 }))
+      },
+    )
+  }
   const head = (
     <div className="file-head">
-      <span className="ellipsis grow small faint">
-        {path}
-        {dirty && ' •'}
-      </span>
-      {dirty && (
-        <>
-          <button className="btn small-btn primary" onClick={() => save()} disabled={saving} title="Save (Ctrl+S)">
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-          <button className="btn small-btn" onClick={reload} title="Drop your changes and take the file as it is on disk">
-            Revert
-          </button>
-        </>
+      <Crumb path={path} dirty={dirty} />
+      {/* Find comes before the Preview / Source switch: it shows only with the
+          source, and placed after it, it pushed the switch aside as it came. */}
+      {codeShown && (
+        <Tool label="Find" keys="Mod+F" icon={<FindIcon />} on={finding} className={findInMenu ? 'wide-only' : undefined} onClick={() => find.current?.()} />
       )}
-      {touch && phoneEdit && (
-        <button className="btn small-btn" onClick={stopEdit}>
-          Done
-        </button>
-      )}
-      {touch && !phoneEdit && text?.utf8 && (
-        <button className="btn small-btn" onClick={startEdit} title="Edit the file here">
-          Edit
-        </button>
-      )}
-      {!dirty && !phoneEdit && mark && (
-        <button className={'btn small-btn' + (diff ? ' on' : '')} onClick={() => setDiff(!diff)} aria-pressed={diff} title={diff ? 'Show the file' : 'Show what changed since the last commit'}>
-          Diff
-        </button>
+      {!dirty && !phoneEdit && (mark || side) && (
+        <Tool label="Diff" tip={diff ? 'Show the file' : side ? 'Show what is not on the remote' : 'Show what changed since the last commit'} icon={<DiffIcon />} on={diff} onClick={() => setDiff(!diff, side)} />
       )}
       {/* Unsaved typing lives in the source view, so it stays on screen. */}
-      {!diff && !dirty && !phoneEdit && (ext === 'md' || ext === 'svg' || tables.has(ext)) && (
-        <button className="btn small-btn" onClick={toggleSource}>
-          {source ? (ext === 'md' ? 'Preview' : ext === 'svg' ? 'Picture' : 'Table') : 'Source'}
-        </button>
+      {switchShown && (
+        <span className={cn('seg', segList)} role="group" aria-label="Show">
+          <Tool
+            label={ext === 'md' ? 'Preview' : ext === 'svg' ? 'Picture' : 'Table'}
+            icon={ext === 'md' ? <PreviewIcon /> : ext === 'svg' ? <PictureIcon /> : <TableIcon />}
+            on={!source}
+            className={segItem}
+            onClick={() => source && toggleSource()}
+          />
+          <Tool label="Source" tip="Source: the file as text" icon={<SourceIcon />} on={source} className={segItem} onClick={() => !source && toggleSource()} />
+        </span>
       )}
-      {!dirty && (ext === 'html' || ext === 'htm' || office.has(ext) || sheets.has(ext)) && <OpenButton root={root} path={path} html={ext === 'html' || ext === 'htm'} />}
-      {!dirty && <DownloadButton root={root} path={path} />}
+      {touch && !phoneEdit && text?.utf8 && <Tool label="Edit" tip="Edit the file here" icon={<EditIcon />} onClick={startEdit} />}
+      {/* Editing on a phone: Done leaves (asking first if there is unsaved
+          typing), then Revert, and Save, the one filled button, last. */}
+      {touch && phoneEdit && <Tool label="Done" tip="Done editing" icon={null} text className="secondary" onClick={stopEdit} />}
+      {dirty && (
+        <>
+          <Tool label="Revert" tip="Revert: drop your changes and take the file as it is on disk" icon={null} text className="secondary wide-only" onClick={revert} />
+          <Tool label={saving ? 'Saving…' : 'Save'} keys="Mod+S" icon={null} text className="primary" onClick={() => save()} disabled={saving} />
+        </>
+      )}
+      {!dirty && (ext === 'html' || ext === 'htm' || office.has(ext) || sheets.has(ext)) && <OpenButton root={root} path={path} html={ext === 'html' || ext === 'htm'} onOpen={openHere} />}
+      {!dirty && <DownloadButton root={root} path={path} className="wide-only" />}
+      <ToolMenu title={path.split('/').pop()!} tools={menu} />
     </div>
   )
   const editNotes = dirty && (
@@ -403,12 +567,12 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
       {conflict && (
         <div className="notice error small edit-conflict">
           The file changed on disk since you started editing.{' '}
-          <button className="btn small-btn" onClick={reload} title="Drop your changes and take the file as it is now">
+          <Button variant="outline" size="xs" onClick={reload} title="Drop your changes and take the file as it is now">
             Reload
-          </button>{' '}
-          <button className="btn small-btn" onClick={() => save(true)} title="Replace the file on disk with your version">
+          </Button>{' '}
+          <Button variant="outline" size="xs" onClick={() => save(true)} title="Replace the file on disk with your version">
             Overwrite
-          </button>
+          </Button>
         </div>
       )}
       {saveErr && <div className="notice error small">{saveErr}</div>}
@@ -419,7 +583,7 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
   // A new version of the file gets a new address, so the browser loads it.
   const versioned = fileURL('raw', root, path) + (stat ? '&v=' + encodeURIComponent(stat.mtime) : '')
   let body
-  if (diff) body = <DiffView root={root} path={path} version={(stat ? stat.size + ':' + stat.mtime : '') + mark} />
+  if (diff) body = <DiffView root={root} path={path} side={side} version={(stat ? stat.size + ':' + stat.mtime : '') + mark} />
   else if (err && !loaded) body = <div className="center error">{err}</div>
   else if (ext === 'pdf') {
     body = (
@@ -486,7 +650,10 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
       <div
         className="file-md"
         ref={scroller}
-        onScroll={() => (mdLine.current = topLine(scroller.current) ?? mdLine.current)}
+        onScroll={() => {
+          const at = topPlace(scroller.current)
+          if (at) [mdLine.current, mdShift.current] = [at.line, at.shift]
+        }}
         onClick={(e) => {
           // Links to other files open as tabs.
           const a = (e.target as HTMLElement).closest('a[data-rel]') as HTMLAnchorElement | null
@@ -505,6 +672,7 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
         <CodeView
           path={path}
           text={edit ? edit.text : loaded.text}
+          revision={revision}
           jump={jump}
           visible={active}
           onLineClick={['tex', 'sty', 'cls', 'bib'].includes(ext) ? showInPdf : undefined}
@@ -514,16 +682,19 @@ export function FileView({ root, path, onOpen, jump, active = true, agentBusy = 
           doc={doc}
           startLine={ext === 'md' ? mdLine.current ?? undefined : undefined}
           pos={pos}
+          find={find}
+          onFind={setFinding}
         />
       </Suspense>
     )
   }
 
   return (
-    <div className="file-view">
+    <div className="file-view" ref={view}>
       {/* A PDF or Word file shows its path in its own bar, saving a line. */}
       {ext !== 'pdf' && ext !== 'docx' && head}
       {err && loaded && !diff && <div className="notice error small">{err}</div>}
+      {openErr && <Problem key={openErr.n} title={`Could not open ${path.split('/').pop()}.`} why={openErr.why} retry={openHere} className="file-problem" />}
       {editNotes}
       {body}
     </div>

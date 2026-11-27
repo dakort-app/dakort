@@ -6,7 +6,11 @@
 // document. The string keeps its case; a lower-case twin of the same
 // length serves the searches that ignore case.
 
-export type Run = { str: string; x: number; top: number; w: number; h: number; eol?: boolean } // PDF points from the page's top-left
+// PDF points from the page's top-left. adv, when known, is where each
+// character starts within the run (str.length + 1 offsets, the last the
+// run's width), from the font's proportions; without it every character
+// is taken to be as wide as the others.
+export type Run = { str: string; x: number; top: number; w: number; h: number; eol?: boolean; adv?: number[] }
 export type PageText<R = Run> = { text: string; lower: string; at: { run: number; ch: number }[]; runs: R[] }
 export type Hit = { page: number; x: number; y: number; w: number; h: number } // page counts from 1, as in a SyncBox
 
@@ -55,13 +59,13 @@ export function pageText<R extends { str: string; eol?: boolean }>(runs: R[]): P
 // match across runs on the same line gets one box from its start to its
 // end; one that wraps to the next line is boxed on its first line only.
 export function find(pt: PageText, q: string, page: number, opts: FindOpts = {}): Hit[] {
-  const per = (r: Run) => (r.str.length ? r.w / r.str.length : 0)
+  const off = (r: Run, ch: number) => (r.adv ? r.adv[Math.min(ch, r.adv.length - 1)] : r.str.length ? (r.w / r.str.length) * ch : 0)
   return spans(pt, q, opts).map(({ s, e }) => {
     const rs = pt.runs[s.run]
     const re = pt.runs[e.run]
-    const x = rs.x + per(rs) * s.ch
+    const x = rs.x + off(rs, s.ch)
     const sameLine = Math.abs(re.top - rs.top) < rs.h / 2
-    const x2 = sameLine ? re.x + per(re) * (e.ch + 1) : rs.x + rs.w
+    const x2 = sameLine ? re.x + off(re, e.ch + 1) : rs.x + rs.w
     return { page, x, y: rs.top, w: Math.max(x2 - x, 1), h: rs.h }
   })
 }

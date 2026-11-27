@@ -5,6 +5,7 @@
 BRIEF.md export-ignore
 CLAUDE.md export-ignore
 RELEASE.md export-ignore
+NEXT.md export-ignore
 scripts export-ignore
 
 # The built web app the binary embeds, so GitHub's language bar counts the

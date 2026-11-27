@@ -17,7 +17,12 @@ type Span = { key: string; first: number; last: number; time: string }
 export type Item =
   | (Span & { kind: 'prompt'; text: string; media: Block[] })
   | (Span & { kind: 'reply'; parts: Part[]; model?: string })
-  | (Span & { kind: 'notice'; tone: 'divider' | 'error' | 'info' | 'output' | 'task'; text: string; detail?: string; signIn?: boolean })
+  | (Span & { kind: 'notice'; tone: 'divider' | 'error' | 'info' | 'output' | 'task'; text: string; detail?: string; signIn?: boolean; compaction?: boolean; tasks?: TaskNews[] })
+
+// TaskNews is one background task's news in words, for its message
+// bubble: what happened ("Background task finished"), the task's name, and
+// how it ended ("exit code 0") or what a monitor printed.
+export type TaskNews = { label: string; name: string; detail: string }
 
 // Context blocks start with a tag: <system-reminder>, <command-name>, ...
 const attachedTag = /^<[a-z][a-z0-9_-]*(\s[^>]*)?>/
@@ -58,16 +63,37 @@ const rowText = (r: Row) => (r.blocks ?? []).map((b) => (b.type === 'text' ? (b.
 // stopped, or a monitor prints. Its summary, and the line printed if any.
 // Undefined for other rows.
 export function taskNotice(r: Row): string | undefined {
+  return taskNews(r)?.text
+}
+
+export function taskNews(r: Row): { text: string; tasks: TaskNews[] } | undefined {
   if (r.role !== 'user') return undefined
   const t = rowText(r).trim()
   if (!t.startsWith('<task-notification>')) return undefined
-  const lines = [...t.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)].map(([, n]) => {
+  const lines: string[] = []
+  const tasks: TaskNews[] = []
+  for (const [, n] of t.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
     const tag = (name: string) => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(n)?.[1]?.trim()
     const summary = tag('summary') || 'Background task'
     const event = tag('event')
-    return event ? `${summary}: ${event}` : summary
-  })
-  return lines.join('\n') || 'Background task'
+    const status = tag('status') ?? ''
+    lines.push(event ? `${summary}: ${event}` : summary)
+    // 'Background command "Build" completed (exit code 0)': the name in
+    // its quotes, the ending in its brackets.
+    const name = /"([^"]+)"/.exec(summary)?.[1] ?? summary.replace(/\s+(completed|failed|was stopped|stopped|killed)\b.*$/i, '')
+    const ending = /\(([^)]+)\)\s*$/.exec(summary)?.[1] ?? ''
+    const label = event || /^monitor/i.test(summary)
+      ? 'Monitor update'
+      : /fail|error/i.test(status) || /\bfailed\b/i.test(summary)
+        ? 'Background task failed'
+        : /kill|stop|cancel/i.test(status) || /\b(stopped|killed)\b/i.test(summary)
+          ? 'Background task stopped'
+          : /complete|done|success/i.test(status) || /\bcompleted\b/i.test(summary)
+            ? 'Background task finished'
+            : 'Background task'
+    tasks.push({ label, name, detail: event ?? ending })
+  }
+  return { text: lines.join('\n') || 'Background task', tasks }
 }
 
 // commandText is a slash command the person ran, as typed ("/context",
@@ -129,7 +155,7 @@ export function group(rows: Row[]): Item[] {
       if (r.subtype === 'compact_boundary') {
         const k = (n: number) => Math.round(n / 1000) + 'k'
         const sizes = r.preTokens ? (r.postTokens ? `, ${k(r.preTokens)} → ${k(r.postTokens)}` : ` (was ${k(r.preTokens)})`) : ''
-        push({ kind: 'notice', key: r.uuid, first: i, last: i, time: r.time, tone: 'divider', text: 'Conversation compacted' + sizes })
+        push({ kind: 'notice', key: r.uuid, first: i, last: i, time: r.time, tone: 'divider', text: 'Conversation compacted' + sizes, compaction: true })
       } else if (r.subtype === 'api_error' || r.level === 'error') {
         push({ kind: 'notice', key: r.uuid, first: i, last: i, time: r.time, tone: 'error', text: r.content || 'API error' })
       }
@@ -145,6 +171,9 @@ export function group(rows: Row[]): Item[] {
         push({ kind: 'notice', key: r.uuid, first: i, last: i, time: r.time, tone: 'error', text: text || 'API error', ...(signIn && { signIn }) })
         return
       }
+      // The CLI's filler after an interrupt says nothing the Interrupted
+      // note doesn't, and stood as a reply with its own Copy and time.
+      if (r.model === '<synthetic>' && (r.blocks ?? []).every((b) => b.type === 'text' && b.text?.trim() === 'No response requested.')) return
       if (!reply) {
         push({ kind: 'reply', key: r.uuid, first: i, last: i, time: r.time, parts: [], model: r.model })
       }
@@ -161,13 +190,21 @@ export function group(rows: Row[]): Item[] {
     // A user row.
     if (r.compactSummary) {
       const detail = (r.blocks ?? []).map((b) => b.text ?? '').join('\n').trim()
+      // The summary right after its compaction is that line's disclosure,
+      // one unit (they stood as two centred lines, a summary under a rule).
+      const prev = items.at(-1)
+      if (prev?.kind === 'notice' && prev.compaction && !prev.detail) {
+        prev.detail = detail
+        prev.last = i
+        return
+      }
       push({ kind: 'notice', key: r.uuid, first: i, last: i, time: r.time, tone: 'divider', text: 'Summary of the earlier conversation', detail })
       return
     }
     if (r.meta) return
-    const task = taskNotice(r)
+    const task = taskNews(r)
     if (task) {
-      push({ kind: 'notice', key: r.uuid, first: i, last: i, time: r.time, tone: 'task', text: task })
+      push({ kind: 'notice', key: r.uuid, first: i, last: i, time: r.time, tone: 'task', text: task.text, tasks: task.tasks })
       return
     }
     const text = promptText(r)
@@ -193,47 +230,6 @@ export function answer(parts: Part[]): string {
     .slice(parts.findLastIndex((p) => p.kind === 'tool') + 1)
     .flatMap((p) => (p.kind === 'text' && p.text.trim() ? [p.text.trim()] : []))
     .join('\n\n')
-}
-
-// toolSummary is the one line a collapsed tool call shows.
-export function toolSummary(use: Block): string {
-  const inp = (use.input ?? {}) as Record<string, unknown>
-  const s = (k: string) => (typeof inp[k] === 'string' ? (inp[k] as string) : '')
-  const base = (p: string) => p.split(/[\\/]/).pop() || p
-  let arg = ''
-  switch (use.name) {
-    case 'Bash':
-    case 'PowerShell':
-      // Claude describes each command in plain words; the command itself
-      // is in the expanded call.
-      arg = s('description') || s('command')
-      break
-    case 'Read':
-    case 'Write':
-    case 'Edit':
-    case 'MultiEdit':
-    case 'NotebookEdit':
-      arg = base(s('file_path') || s('notebook_path'))
-      break
-    case 'Grep':
-    case 'Glob':
-      arg = s('pattern')
-      break
-    case 'WebFetch':
-      arg = s('url')
-      break
-    case 'WebSearch':
-      arg = s('query')
-      break
-    case 'Task':
-    case 'Agent':
-      arg = s('description')
-      break
-    default:
-      arg = Object.values(inp).find((v) => typeof v === 'string') as string ?? ''
-  }
-  arg = arg.replace(/\s+/g, ' ').trim()
-  return arg ? `${use.name}: ${arg}` : use.name ?? 'tool'
 }
 
 // resultText flattens a tool result's text parts.

@@ -138,7 +138,8 @@ func (s *Server) restoreSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // emptyTrash removes entries older than trashKeep. Only names matching
-// trashName (a session) or fileTrashName (a file, filetrash.go), directly
+// trashName (a session), fileTrashName (a file, filetrash.go) or
+// gitTrashName (what a discard took, gitops.go), directly
 // inside the trash folder, are ever removed.
 func emptyTrash(trash string) {
 	if trash == "" {
@@ -158,6 +159,8 @@ func emptyTrash(trash string) {
 			prefix = "made-trash-"
 		case fileTrashName.MatchString(name):
 			prefix = "made-filetrash-"
+		case gitTrashName.MatchString(name):
+			prefix = "made-gittrash-"
 		default:
 			continue
 		}

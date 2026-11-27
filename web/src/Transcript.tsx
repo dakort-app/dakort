@@ -1,18 +1,25 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { api, assetURL, HTTPError } from './api'
-import { cacheLifeMs, useConfig } from './config'
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
+import { api, HTTPError } from './api'
 import { landed as previewLanded, liveBlocks } from './live'
 import { providerOf } from './local'
 import { copyText } from './clip'
-import { CheckIcon, CopyIcon } from './icons'
+import { CheckIcon, CopyIcon, Icon } from './icons'
 import { Markdown } from './Markdown'
 import { PromptText } from './PromptText'
-import { SignIn } from './SignIn'
 import { latestTitle, titles } from './thinking'
-import { answer, group, landed, resultText, toolSummary, type Item, type Part } from './rows'
+import { answer, group, landed, type Item, type Part, type TaskNews } from './rows'
+import { readableError, segments } from './tools'
+import { retryPrompt } from './Composer'
+import { Chevron, ErrorMark, Media, ProjectRoot, Thumb, ToolRow, ToolRun } from './ToolView'
 import { dropPending, onCatchUp, onCollapse, setCacheLife, setContext, setLastReply, setReplyModel, setRowWindow, useStore, type Pending } from './store'
-import type { Block, LiveBlock, Row } from './types'
+import type { LiveBlock, Row } from './types'
 import { append, canReveal, collapse, fromTail, hasOlder, pinIndex, prepend, reveal, type Win } from './window'
+import { Button } from '@/components/ui/button'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+
+// The sign-in shows only when the CLI is signed out: its own chunk.
+const SignIn = lazy(() => import('./SignIn').then((m) => ({ default: m.SignIn })))
 
 // How close to the top an idle scroll position must be to load older rows:
 // two screens, so the next batch is usually in before the top is reached
@@ -27,9 +34,12 @@ const rowWaitTries = 40
 export function Transcript({ id }: { id: string }) {
   // The prompt-cache note is Claude's; Codex has no such clock.
   const listed = useStore((s) => s.sessions.find((x) => x.id === id)?.provider)
+  const folder = useStore((s) => s.sessions.find((x) => x.id === id)?.folder) ?? ''
   const codex = providerOf(id, listed) === 'codex'
   const [win, setWin] = useState<Win | null>(null)
   const [err, setErr] = useState('')
+  // Bumped by Retry on a transcript that failed to load.
+  const [attempt, setAttempt] = useState(0)
   const winRef = useRef(win)
   winRef.current = win
   const box = useRef<HTMLDivElement>(null)
@@ -41,7 +51,7 @@ export function Transcript({ id }: { id: string }) {
   // The first rendered item and where it was on screen before older rows
   // went in above it; the layout effect puts it back there. Mobile Safari
   // has no scroll anchoring, so this is done by hand.
-  const anchor = useRef<{ key: string; top: number } | null>(null)
+  const anchor = useRef<{ key: string; bottom: number } | null>(null)
   const turn = useStore((s) => s.live.turns[id])
   const ended = useStore((s) => s.live.ended[id])
 
@@ -136,19 +146,12 @@ export function Transcript({ id }: { id: string }) {
       offCollapse()
       clearTimeout(retry.current)
     }
-  }, [id])
+  }, [id, attempt])
 
   const older = async () => {
     const w = winRef.current
     if (loadingOlder.current || !w || !w.rows.length || !hasOlder(w)) return
     loadingOlder.current = true
-    // Hold in place what is on screen: the first item still visible, not
-    // the first in the list, which may be off screen and may grow when the
-    // older rows of its own reply arrive above it.
-    const top = box.current?.getBoundingClientRect().top ?? 0
-    const items = Array.from(box.current?.querySelectorAll<HTMLElement>('[data-anchor]') ?? [])
-    const seen = items.find((el) => el.getBoundingClientRect().bottom > top) ?? items[0]
-    anchor.current = seen ? { key: seen.dataset.anchor!, top: seen.getBoundingClientRect().top } : null
     try {
       let next = w
       if (!canReveal(next, olderStep)) {
@@ -157,7 +160,17 @@ export function Transcript({ id }: { id: string }) {
       }
       next = reveal(next, olderStep)
       winRef.current = next
-      setWin(next)
+      // Hold in place what is on screen as the rows land, not as they were
+      // asked for: a scroll while the page was on its way was undone, the
+      // view jumping back by that much. The first item still visible, by
+      // its bottom edge: its own older rows may arrive and grow it at the
+      // top. Rendered at once, so no scroll comes between the look and the
+      // render.
+      const top = box.current?.getBoundingClientRect().top ?? 0
+      const items = Array.from(box.current?.querySelectorAll<HTMLElement>('[data-anchor]') ?? [])
+      const seen = items.find((el) => el.getBoundingClientRect().bottom > top) ?? items[0]
+      anchor.current = seen ? { key: seen.dataset.anchor!, bottom: seen.getBoundingClientRect().bottom } : null
+      flushSync(() => setWin(next))
       setErr('')
     } catch (e) {
       anchor.current = null
@@ -215,9 +228,16 @@ export function Transcript({ id }: { id: string }) {
   // turn's failure, already in words on the page.
   const lastItem = shown.at(-1)
   const lastError = !waitingPrompts.length && lastItem?.kind === 'notice' && lastItem.tone === 'error' ? lastItem : undefined
+  // A turn that failed while this page watched (not one in the history)
+  // can be tried again: its prompt, as text (one with images is not).
+  const lastPrompt = shown.findLast((it) => it.kind === 'prompt')
+  const failedHere = !!ended && (!!ended.error || (!!ended.result && !ended.result.ok && !ended.result.interrupted && !ended.result.signIn))
+  const tryAgain =
+    !turn && failedHere && !waitingPrompts.length && lastPrompt?.kind === 'prompt' && lastPrompt.text && !lastPrompt.media.length
+      ? () => retryPrompt(id, lastPrompt.text)
+      : undefined
 
   // The context meter reads the last assistant row's size.
-  const lastRow = win?.rows[win.rows.length - 1]
   const context = win ? lastContext(win.rows) : 0
   useEffect(() => {
     if (win) setContext(id, context) // 0 after a compaction that did not record its size
@@ -254,7 +274,7 @@ export function Transcript({ id }: { id: string }) {
       // bottom drift when the rows below it changed height meanwhile.
       const same = el.querySelector<HTMLElement>(`[data-anchor="${CSS.escape(a.key)}"]`)
       if (stick.current) el.scrollTop = el.scrollHeight
-      else if (same) el.scrollTop += same.getBoundingClientRect().top - a.top
+      else if (same) el.scrollTop += same.getBoundingClientRect().bottom - a.bottom
       loadingOlder.current = false
     } else if (stick.current && !touching.current) {
       // Not under a finger: moving the view while it drags fights it.
@@ -299,7 +319,16 @@ export function Transcript({ id }: { id: string }) {
     }, 150)
   }
 
-  if (err && !win) return <div className="transcript center error">{err}</div>
+  if (err && !win)
+    return (
+      <LoadFailed
+        err={err}
+        retry={() => {
+          setErr('')
+          setAttempt((n) => n + 1)
+        }}
+      />
+    )
   // A prompt just sent stays on screen while its session loads (a new
   // session's first prompt went away for that moment).
   if (!win)
@@ -313,60 +342,116 @@ export function Transcript({ id }: { id: string }) {
       <div className="transcript center faint">Loading…</div>
     )
   return (
-    <div
-      className="transcript"
-      ref={box}
-      onScroll={onScroll}
-      onTouchStart={() => (touching.current = true)}
-      onTouchEnd={() => {
-        touching.current = false
-        onScroll()
-      }}
-    >
-      {hasOlder(win) ? (
-        <div className="faint small center-text older" onClick={older}>
-          Loading older messages…
-        </div>
-      ) : (
-        <div className="faint small center-text">Start of the session</div>
-      )}
-      {shown.map((it, i) => (
-        <ItemView key={it.key} item={it} prev={shown[i - 1]} anchor={win.rows[it.last].uuid} />
-      ))}
-      {waitingPrompts.map((p) => (
-        <WaitingPrompt key={p.id} p={p} />
-      ))}
-      {(turn || live.length > 0) && (
-        <div className="reply live">
-          {/* Thinking is a word on the status line, not a line of its own:
-              its row is empty (the CLI keeps no thinking text) and shows
-              nothing, so a "Thinking…" line came and went at every step. */}
-          {live.map((b, i) => (b.kind === 'thinking' ? null : <Markdown key={i} text={b.text} />))}
-          {turn && (
-            <div className="faint small working">
-              {turn.state === 'starting' ? `Starting ${codex ? 'Codex' : 'Claude'}…` : fresh.at(-1)?.kind === 'thinking' ? `${latestTitle(fresh.at(-1)!.text) ?? 'Thinking'}…` : 'Working…'}
-            </div>
-          )}
-        </div>
-      )}
-      {!turn && ended?.error && <div className="notice error">{ended.error}</div>}
-      {/* The sign-in, once: from the turn that just failed, or from the
-          session's last row, which a reload still has. A failed turn whose
-          error the transcript already shows says nothing more (its bare
-          terminal_reason, "api_error", read as a second failure). */}
-      {!turn && (ended?.result?.signIn || lastError?.signIn) ? (
-        <SignIn cli={codex ? 'codex' : 'claude'} />
-      ) : !turn && !lastError && ended?.result && !ended.result.ok && !ended.result.interrupted && (
-        <div className="notice error pre-line">{ended.result.errors?.join('\n') || ended.result.text || 'The turn failed.'}</div>
-      )}
-      {!turn && !waitingPrompts.length && lastRow && !codex && <IdleNote at={lastRow.time} context={context} life={life} />}
-      {err && <div className="notice error">{err}</div>}
+    <ProjectRoot.Provider value={folder}>
+      <div
+        className="transcript"
+        ref={box}
+        onClick={(e) => openLink(e, folder)}
+        onScroll={onScroll}
+        onTouchStart={() => (touching.current = true)}
+        onTouchEnd={() => {
+          touching.current = false
+          onScroll()
+        }}
+      >
+        {hasOlder(win) ? (
+          <button type="button" className="older" onClick={older}>
+            <span className="shimmer">Loading older messages…</span>
+          </button>
+        ) : (
+          <div className="stamp session-start">{startLine(shown[0])}</div>
+        )}
+        {shown.map((it, i) => (
+          <ItemView
+            key={it.key}
+            item={it}
+            prev={i ? shown[i - 1] : hasOlder(win) ? undefined : it}
+            anchor={win.rows[it.last].uuid}
+            end={win.rows[it.last].time}
+            prevEnd={i ? win.rows[shown[i - 1].last].time : undefined}
+            live={!!turn && i === shown.length - 1}
+            retry={it === lastError ? tryAgain : undefined}
+          />
+        ))}
+        {waitingPrompts.map((p) => (
+          <WaitingPrompt key={p.id} p={p} />
+        ))}
+        {(turn || live.length > 0) && (
+          <div className={'reply live' + (turn && live.length && live[live.length - 1].kind !== 'thinking' ? ' streaming' : '')}>
+            {/* Thinking is a word on the status line, not a line of its own:
+                its row is empty (the CLI keeps no thinking text) and shows
+                nothing, so a "Thinking…" line came and went at every step. */}
+            {live.map((b, i) => (b.kind === 'thinking' ? null : <Markdown key={i} text={b.text} opts={replyLinks} />))}
+            {turn && (
+              <div className={'working' + (turn.permissions?.length ? ' needs-you' : '')} role="status">
+                {/* The turn's one running mark: its state in muted words, a
+                    light passing over them (no ring, nothing in the accent). */}
+                {turn.permissions?.length ? (
+                  <>
+                    <WarnIcon />
+                    {`Waiting for you: allow ${turn.permissions[0].tool}?`}
+                  </>
+                ) : (
+                  <span className="shimmer">
+                    {turn.state === 'starting' ? `Starting ${codex ? 'Codex' : 'Claude'}…` : fresh.at(-1)?.kind === 'thinking' ? `${latestTitle(fresh.at(-1)!.text) ?? 'Thinking'}…` : 'Working…'}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        {!turn && ended?.error && <ErrorNote text={ended.error} retry={tryAgain} />}
+        {/* The sign-in, once: from the turn that just failed, or from the
+            session's last row, which a reload still has. A failed turn whose
+            error the transcript already shows says nothing more (its bare
+            terminal_reason, "api_error", read as a second failure). */}
+        {!turn && (ended?.result?.signIn || lastError?.signIn) ? (
+          <Suspense fallback={null}>
+            <SignIn cli={codex ? 'codex' : 'claude'} />
+          </Suspense>
+        ) : !turn && !lastError && ended?.result && !ended.result.ok && !ended.result.interrupted && (
+          <ErrorNote text={ended.result.errors?.join('\n') || ended.result.text || ''} retry={tryAgain} />
+        )}
+        {err && (
+          <div className="notice error catch-up" role="status">
+            <span>Not up to date ({err}). Trying again…</span>
+          </div>
+        )}
+      </div>
+    </ProjectRoot.Provider>
+  )
+}
+
+// LoadFailed is a transcript that did not load: what happened in words,
+// Try again, and the server's own words under Details.
+function LoadFailed({ err, retry }: { err: string; retry: () => void }) {
+  const [open, setOpen] = useState(false)
+  const why = /input\/output|\bEIO\b|no such file|ENOENT|permission denied|EACCES/i.test(err)
+    ? "The session’s file couldn’t be read on the computer."
+    : /^HTTP 5\d\d|\b50[0-9]\b/.test(err)
+      ? 'The server had a problem sending it.'
+      : /^HTTP 404|not found/i.test(err)
+        ? 'The server has no such session.'
+        : 'The server could not send it.'
+  return (
+    <div className="transcript center error load-failed" role="alert">
+      <Icon name="circle-x" className="mark-x load-failed-mark" />
+      <div className="load-failed-head">Couldn’t load this session</div>
+      <div className="load-failed-why">{why}</div>
+      <Button type="button" variant="default" size="sm" onClick={retry}>
+        Try again
+      </Button>
+      <button type="button" className="details-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Chevron />
+        Details
+      </button>
+      {open && <pre className="raw load-failed-raw">{err}</pre>}
     </div>
   )
 }
 
-// WaitingPrompt is a prompt on its way, greyed until its row is in.
-function WaitingPrompt({ p }: { p: Pending }) {
+// WaitingPrompt is a prompt on its way, marked Sending until its row is in.
+export function WaitingPrompt({ p }: { p: Pick<Pending, 'text' | 'images'> }) {
   return (
     <div className="item-wrap">
       <div className="prompt pending">
@@ -375,9 +460,14 @@ function WaitingPrompt({ p }: { p: Pending }) {
         ))}
         {p.text && <PromptText text={p.text} />}
       </div>
+      <div className="sending">
+        <span className="shimmer">Sending…</span>
+      </div>
     </div>
   )
 }
+
+const WarnIcon = () => <span className="dot needs mark-warn" aria-hidden />
 
 function lastAssistantTime(rows: Row[]): number {
   for (let i = rows.length - 1; i >= 0; i--) if (rows[i].role === 'assistant' && !rows[i].apiError) return Date.parse(rows[i].time) || 0
@@ -394,35 +484,36 @@ function lastContext(rows: Row[]): number {
   return 0
 }
 
-// Past the prompt cache's life, the next message pays to read the whole
-// context in again, which on a big session is worth knowing before
-// sending from a phone.
-function IdleNote({ at, context, life }: { at: string; context: number; life: string }) {
-  const cfg = useConfig()
-  const idle = Date.now() - Date.parse(at)
-  if (!(idle > cacheLifeMs(cfg, life))) return null
-  const h = Math.floor(idle / 3_600_000)
-  const span = h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : `${h}h ${Math.floor((idle % 3_600_000) / 60_000)}m`
-  return (
-    <div className="notice info">
-      Idle {span}. The prompt cache has likely expired
-      {context ? `, so the next message reads about ${tokens(context)} tokens in again.` : '.'}
-    </div>
-  )
-}
-
 export function tokens(n: number): string {
   return n >= 1_000_000 ? (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1000 ? Math.round(n / 1000) + 'k' : String(n)
 }
 
-function stamp(it: Item, prev?: Item): string {
+// The start of a session says when it began, with the date even today
+// (a time alone left the day unsaid); its first item then needs no time
+// of its own (they stood as two centred lines, one over the other).
+function startLine(first?: Item): string {
+  const when = first ? when_(Date.parse(first.time), true) : ''
+  return when ? `Start of the session · ${when}` : 'Start of the session'
+}
+
+// A centred time goes over an item 5 minutes or more after the one above
+// it ended (not began: a long reply's own time is its end, under it, and
+// the same minute stood twice, once under the reply and once centred).
+function stamp(it: Item, prev?: Item, prevEnd?: string): string {
   const t = Date.parse(it.time)
   if (!t) return ''
-  const p = prev ? Date.parse(prev.time) : 0
+  if (prev === it) return '' // the first item, timed by the start line
+  const p = prev ? Date.parse(prevEnd || prev.time) : 0
   if (p && t - p < 5 * 60_000) return ''
+  return when_(t)
+}
+
+// A time today, "Nov 24, 3:40 PM" on other days (or always, dated).
+function when_(t: number, dated = false): string {
+  if (!t) return ''
   const d = new Date(t)
   const today = new Date().toDateString() === d.toDateString()
-  return today
+  return today && !dated
     ? d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
     : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
@@ -430,8 +521,12 @@ function stamp(it: Item, prev?: Item): string {
 // An item's key is its first row, which rows arriving below never change.
 // Older rows fetched above can extend an item upward and change that, so
 // the scroll anchor is its last row instead.
-function ItemView({ item, prev, anchor }: { item: Item; prev?: Item; anchor: string }) {
-  const when = stamp(item, prev)
+function ItemView({ item, prev, prevEnd, anchor, end, live, retry }: { item: Item; prev?: Item; prevEnd?: string; anchor: string; end: string; live: boolean; retry?: () => void }) {
+  // A compaction is a marker, not a message: no time over it (its time is
+  // the label's tip), the stamp and the line stood stacked. A background
+  // task's message carries its own time.
+  const own = item.kind === 'notice' && (item.tone === 'divider' || item.tone === 'task')
+  const when = own ? '' : stamp(item, prev, prevEnd)
   return (
     <div data-anchor={anchor} className="item-wrap">
       {when && <div className="stamp">{when}</div>}
@@ -443,20 +538,16 @@ function ItemView({ item, prev, anchor }: { item: Item; prev?: Item; anchor: str
           {item.text && <PromptText text={item.text} />}
         </div>
       ) : item.kind === 'reply' ? (
-        <div className="reply">
-          {item.parts.map((p, i) => (
-            <PartView key={i} part={p} />
-          ))}
-          <CopyReply parts={item.parts} />
-        </div>
+        <ReplyView parts={item.parts} live={live} at={end} />
       ) : (
-        <Notice item={item} />
+        <Notice item={item} retry={retry} />
       )}
     </div>
   )
 }
 
-function CopyReply({ parts }: { parts: Part[] }) {
+// The reply's footer: Copy, and when it finished.
+function CopyReply({ parts, at }: { parts: Part[]; at: string }) {
   const [state, setState] = useState<'' | 'copied' | 'failed'>('')
   const text = answer(parts)
   useEffect(() => {
@@ -464,33 +555,31 @@ function CopyReply({ parts }: { parts: Part[] }) {
     const t = window.setTimeout(() => setState(''), 1500)
     return () => clearTimeout(t)
   }, [state])
+  // The time goes with Copy: a reply of tool rows alone (one cut off, say)
+  // stood as a lone time, a second one by the next reply's.
   if (!text) return null
+  const when = when_(Date.parse(at))
   return (
     <div className="reply-actions">
-      <button
-        type="button"
-        className={'copy-btn' + (state ? ' ' + state : '')}
-        title="Copy the answer as Markdown"
-        aria-label={state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed' : 'Copy'}
-        onClick={async () => setState((await copyText(text)) ? 'copied' : 'failed')}
-      >
-        {state === 'copied' ? <CheckIcon /> : <CopyIcon />}
-        {state === 'failed' && <span>Copy failed</span>}
-      </button>
+      {text && (
+        <button
+          type="button"
+          className={'copy-btn' + (state ? ' ' + state : '')}
+          title="Copy the answer as Markdown"
+          aria-label={state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed' : 'Copy'}
+          onClick={async () => setState((await copyText(text)) ? 'copied' : 'failed')}
+        >
+          {state === 'copied' ? <CheckIcon sm /> : <CopyIcon sm />}
+          {state === 'failed' ? <span>Copy failed</span> : <span className="copy-label">{state === 'copied' ? 'Copied' : 'Copy'}</span>}
+        </button>
+      )}
+      {when && <span className="reply-time">{when}</span>}
     </div>
   )
 }
 
-function Notice({ item }: { item: Extract<Item, { kind: 'notice' }> }) {
-  const [open, setOpen] = useState(false)
-  if (item.tone === 'divider') {
-    return (
-      <div className="divider" onClick={() => item.detail && setOpen(!open)}>
-        <span>{item.text}</span>
-        {open && item.detail && <Markdown text={item.detail} />}
-      </div>
-    )
-  }
+function Notice({ item, retry }: { item: Extract<Item, { kind: 'notice' }>; retry?: () => void }) {
+  if (item.tone === 'divider') return <Compaction item={item} at={when_(Date.parse(item.time))} />
   if (item.tone === 'output') {
     // A command's printout (/context, /usage): Markdown, in a card.
     return (
@@ -499,112 +588,188 @@ function Notice({ item }: { item: Extract<Item, { kind: 'notice' }> }) {
       </div>
     )
   }
-  return <div className={'notice ' + item.tone}>{item.text}</div>
+  if (item.tone === 'error') return <ErrorNote text={item.text} retry={retry} />
+  if (item.tone === 'task' && item.tasks?.length) return <TaskMessage tasks={item.tasks} at={when_(Date.parse(item.time))} />
+  // Interrupted: when, muted beside it, as a reply's time (a turn that
+  // ends here has no Copy line to carry one).
+  const at = item.text === 'Interrupted' ? when_(Date.parse(item.time)) : ''
+  return (
+    <div className={'notice ' + item.tone}>
+      {item.text}
+      {at && <span className="reply-time">{at}</span>}
+    </div>
+  )
 }
 
-function PartView({ part }: { part: Part }) {
+// TaskMessage is a background task's news as what it is, a message to
+// Claude that starts a new turn: a bubble on the right like a prompt, but
+// marked as the system's (its label, the task's name, how it ended, and
+// when), so the reply under it reads as its answer.
+function TaskMessage({ tasks, at }: { tasks: TaskNews[]; at: string }) {
+  return (
+    <div className="task-msg" role="note">
+      {tasks.map((t, i) => (
+        <div key={i} className="task-msg-one">
+          <div className="task-msg-head">
+            <Icon name="bot" sm />
+            <span>{t.label}</span>
+            {i === 0 && at && <span className="reply-time">{at}</span>}
+          </div>
+          <div className="task-msg-name">
+            {t.name}
+            {t.detail && <span className="task-msg-detail"> · {t.detail}</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Compaction is one unit, as Claude desktop and Cursor mark theirs: a
+// hairline with what happened in its middle, the summary a disclosure
+// under it. (No idle line: the composer's Cold chip says the cache went.)
+// Open, the summary's head stays at the top while it scrolls by, and a
+// Hide at its end closes it from below too (it was a long way back up).
+function Compaction({ item, at }: { item: Extract<Item, { kind: 'notice' }>; at?: string }) {
+  const [open, setOpen] = useState(false)
+  const head = useRef<HTMLDivElement>(null)
+  const close = () => {
+    setOpen(false)
+    // Back to the line, if closing from below left it out of view.
+    requestAnimationFrame(() => {
+      const el = head.current
+      if (el && el.getBoundingClientRect().top < 0) el.scrollIntoView({ block: 'center' })
+    })
+  }
+  return (
+    <div className={'compaction' + (open ? ' open' : '')} ref={head}>
+      <div className="compaction-line">
+        <span className="compaction-label" title={at}>{item.text}</span>
+      </div>
+      {item.detail && !open && (
+        <div className="compaction-sub">
+          <button type="button" className="compaction-btn" aria-expanded={false} onClick={() => setOpen(true)}>
+            Summary
+            <Chevron />
+          </button>
+        </div>
+      )}
+      {open && item.detail && (
+        <div className="compaction-summary">
+          <div className="compaction-head">
+            <button type="button" className="compaction-btn" aria-expanded onClick={close}>
+              Summary of the earlier conversation
+              <Chevron />
+            </button>
+          </div>
+          <div className="compaction-body">
+            <Markdown text={item.detail} />
+          </div>
+          <div className="compaction-foot">
+            <button type="button" className="compaction-btn" onClick={close}>
+              Hide summary
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ErrorNote is a failure in words: an API error's JSON becomes a sentence,
+// with the original a tap away.
+// A turn that failed on this page can be tried again: the composer sends
+// its prompt once more, with the chips as they are.
+function ErrorNote({ text, retry }: { text: string; retry?: () => void }) {
+  const [open, setOpen] = useState(false)
+  const r = readableError(text)
+  return (
+    <div className="notice error" role="status">
+      <div className="notice-row">
+        <ErrorMark />
+        <div className="notice-text">
+          <div className="notice-title">{r.title ?? 'The turn failed'}</div>
+          {r.text && <div className="notice-why pre-line">{r.text}</div>}
+        </div>
+      </div>
+      {(r.raw || retry) && (
+        <div className="notice-actions">
+          {retry && (
+            <Button type="button" variant="outline" size="sm" onClick={retry}>
+              Try again
+            </Button>
+          )}
+          {r.raw && (
+            <button type="button" className="details-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+              <Chevron />
+              Details
+            </button>
+          )}
+        </div>
+      )}
+      {open && r.raw && <pre className="raw">{r.raw}</pre>}
+    </div>
+  )
+}
+
+// A reply: its parts in order, each run of tool calls on one line.
+function ReplyView({ parts, live, at }: { parts: Part[]; live: boolean; at: string }) {
+  const segs = useMemo(() => segments(parts), [parts])
+  const part = (p: Part, i: number) => <PartView key={i} part={p} live={live} />
+  return (
+    <div className="reply">
+      {segs.map((s) => (s.kind === 'tools' ? <ToolRun key={s.at} parts={s.parts} render={part} /> : part(s.part, s.at)))}
+      {/* Copy and the time once the turn has ended: while it runs, the
+          working line is the only thing under the reply. */}
+      {!live && <CopyReply parts={parts} at={at} />}
+    </div>
+  )
+}
+
+// A relative link in a reply names a file in the project ("[the readme](README.md)"):
+// it opens in a tab (Workspace listens), where the browser went to a 404.
+const replyLinks = { resolve: (href: string, kind: 'image' | 'link') => (kind === 'link' ? '#' : href) }
+function openLink(e: React.MouseEvent, folder: string) {
+  const a = (e.target as HTMLElement).closest<HTMLAnchorElement>('a[data-rel]')
+  if (!a) return
+  e.preventDefault()
+  const path = a.dataset.rel!.replace(/[#?].*$/, '').replace(/^\.\//, '')
+  if (path) window.dispatchEvent(new CustomEvent('dakort:open-file', { detail: { folder, path } }))
+}
+
+function PartView({ part, live }: { part: Part; live: boolean }) {
   switch (part.kind) {
     case 'text':
-      return <Markdown text={part.text} />
+      return <Markdown text={part.text} opts={replyLinks} />
     case 'thinking':
       return <Thinking text={part.text} />
     case 'tool':
-      return <Tool use={part.use} result={part.result} />
+      return <ToolRow use={part.use} result={part.result} live={live} />
     case 'media':
       return <Media block={part.block} />
   }
 }
 
 // Thinking shows when it has text (recent CLIs record most of it empty;
-// those left a bare "Thought" line each, noise): a few lines in grey
-// italics, the rest a tap away. A summary made of titled steps (Codex's)
-// shows just the titles, and opens to the whole of it as markdown.
+// those left a bare "Thought" line each, noise): a row that says it is
+// thinking with a line of it, the whole a tap away, so it never reads as
+// part of the reply. A summary made of titled steps (Codex's) previews
+// just the titles, and opens to the whole of it as markdown.
 function Thinking({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
   const steps = useMemo(() => titles(text), [text])
   if (!text.trim()) return null
-  if (steps.length && open)
-    return (
-      <div className="thinking open md-thinking" onClick={() => setOpen(false)}>
-        <Markdown text={text} />
-      </div>
-    )
+  const preview = (steps.length ? steps.join(' · ') : text).replace(/\s+/g, ' ').trim()
   return (
-    <div className={'thinking' + (open ? ' open' : '')} onClick={() => setOpen(!open)} title={open ? '' : 'Show all'}>
-      {steps.length ? steps.join('\n') : text}
-    </div>
-  )
-}
-
-// Tool calls stay one line until tapped, and their bodies are not built
-// until then (some results are hundreds of KB).
-function Tool({ use, result }: { use: Block; result?: Block }) {
-  const [open, setOpen] = useState(false)
-  const status = !result ? 'pending' : result.isError ? 'failed' : 'ok'
-  return (
-    <div className={'tool ' + status}>
-      <div className="tool-line clickable" onClick={() => setOpen(!open)}>
-        <span className="tool-dot" />
-        <span className="ellipsis">{toolSummary(use)}</span>
-      </div>
-      {open && (
-        <div className="tool-body">
-          <div className="pre small">{JSON.stringify(use.input, null, 2)}</div>
-          {result && <ResultBody block={result} />}
-        </div>
-      )}
-    </div>
-  )
-}
-
-const maxResult = 20_000
-
-function ResultBody({ block }: { block: Block }) {
-  const text = resultText(block)
-  const media = (block.content ?? []).filter((c) => c.type === 'image' || c.type === 'document')
-  return (
-    <>
-      {text && (
-        <div className={'pre small result' + (block.isError ? ' error' : '')}>
-          {text.length > maxResult ? text.slice(0, maxResult) + `\n… ${text.length - maxResult} more characters` : text}
-        </div>
-      )}
-      {media.map((b, i) => (
-        <Media key={i} block={b} />
-      ))}
-    </>
-  )
-}
-
-// Thumb is an image as a thumbnail; a click shows it large in a popup that
-// a click anywhere, or Escape, closes.
-function Thumb({ src }: { src: string }) {
-  const [big, setBig] = useState(false)
-  useEffect(() => {
-    if (!big) return
-    const off = (e: KeyboardEvent) => e.key === 'Escape' && setBig(false)
-    window.addEventListener('keydown', off)
-    return () => window.removeEventListener('keydown', off)
-  }, [big])
-  return (
-    <>
-      <img className="thumb" src={src} alt="" loading="lazy" onClick={() => setBig(true)} />
-      {big && (
-        <div className="lightbox" onClick={() => setBig(false)} role="dialog" aria-label="Image">
-          <img src={src} alt="" />
-        </div>
-      )}
-    </>
-  )
-}
-
-function Media({ block }: { block: Block }) {
-  if (!block.asset) return <span className="faint small">[{block.type}]</span>
-  if (block.type === 'image') return <Thumb src={assetURL(block.asset)} />
-
-  return (
-    <a className="small" href={assetURL(block.asset)} target="_blank" rel="noreferrer">
-      PDF ({Math.round((block.size ?? 0) / 1024)} KB)
-    </a>
+    <Collapsible open={open} onOpenChange={setOpen} className={'thinking' + (open ? ' open' : '')}>
+      <CollapsibleTrigger asChild>
+        <button type="button" className="thinking-row">
+          <Chevron />
+          <span className="thinking-label">Thinking</span>
+          {!open && <span className="thinking-preview">{preview}</span>}
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="thinking-body">{steps.length ? <Markdown text={text} /> : text}</CollapsibleContent>
+    </Collapsible>
   )
 }

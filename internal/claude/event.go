@@ -26,6 +26,20 @@ type line struct {
 	Model string `json:"model"`
 	Cwd   string `json:"cwd"`
 
+	// system/task_started, system/task_progress (the CLI's source,
+	// claude 2.1.327; task_progress not yet seen in a measured stream).
+	// Its usage is read from Usage below, the result's field of that name.
+	TaskID       string `json:"task_id"`
+	ToolUseID    string `json:"tool_use_id"`
+	SubagentType string `json:"subagent_type"`
+	TaskType     string `json:"task_type"`
+	LastToolName string `json:"last_tool_name"`
+	Summary      string `json:"summary"`
+
+	// assistant: the message, read for its tool calls only. Raw, as the
+	// field is not an object on every line type.
+	Message json.RawMessage `json:"message"`
+
 	// system/background_tasks_changed
 	Tasks []struct {
 		TaskID      string `json:"task_id"`
@@ -109,6 +123,24 @@ func parseEvent(raw []byte) []agent.Event {
 			for _, t := range l.Tasks {
 				ev.Tasks = append(ev.Tasks, agent.Task{ID: t.TaskID, Type: t.TaskType, Description: t.Description})
 			}
+		case "task_started", "task_progress":
+			if l.TaskID == "" {
+				break
+			}
+			info := &agent.Task{ID: l.TaskID, Type: l.TaskType, ToolUseID: l.ToolUseID, Subagent: l.SubagentType}
+			if l.Subtype == "task_progress" {
+				var u struct {
+					ToolUses   int   `json:"tool_uses"`
+					DurationMS int64 `json:"duration_ms"`
+				}
+				json.Unmarshal(l.Usage, &u)
+				info.Steps, info.Running = u.ToolUses, u.DurationMS
+				info.Last = firstLine(l.Summary)
+				if info.Last == "" {
+					info.Last = l.LastToolName
+				}
+			}
+			ev.Kind, ev.TaskInfo = agent.KindTaskInfo, info
 		}
 	case "stream_event":
 		if l.Event != nil && l.Event.Type == "content_block_delta" && l.Event.Delta != nil {
@@ -122,6 +154,7 @@ func parseEvent(raw []byte) []agent.Event {
 	case "assistant":
 		ev.Kind = agent.KindAssistant
 		json.Unmarshal(l.Error, &ev.Error) // a string or nothing
+		ev.ToolCalls = toolCalls(l.Message)
 	case "user":
 		ev.Kind, ev.Replay = agent.KindUser, l.IsReplay
 	case "result":
@@ -156,4 +189,45 @@ func parseEvent(raw []byte) []agent.Event {
 		ev.Result = r
 	}
 	return []agent.Event{ev}
+}
+
+// toolCalls reads an assistant message's Agent and Bash calls, whose
+// inputs say what a background task started by one is.
+func toolCalls(msg json.RawMessage) []agent.ToolCall {
+	if len(msg) == 0 || msg[0] != '{' {
+		return nil
+	}
+	var m struct {
+		Content []struct {
+			Type  string `json:"type"`
+			ID    string `json:"id"`
+			Name  string `json:"name"`
+			Input struct {
+				Model        string `json:"model"`
+				SubagentType string `json:"subagent_type"`
+				Command      string `json:"command"`
+			} `json:"input"`
+		} `json:"content"`
+	}
+	if json.Unmarshal(msg, &m) != nil {
+		return nil
+	}
+	var out []agent.ToolCall
+	for _, b := range m.Content {
+		if b.Type != "tool_use" || (b.Name != "Agent" && b.Name != "Task" && b.Name != "Bash") {
+			continue
+		}
+		out = append(out, agent.ToolCall{ID: b.ID, Name: b.Name, Model: b.Input.Model, Subagent: b.Input.SubagentType, Command: b.Input.Command})
+	}
+	return out
+}
+
+// firstLine is s's first non-empty line, trimmed.
+func firstLine(s string) string {
+	for _, l := range strings.Split(s, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			return l
+		}
+	}
+	return ""
 }

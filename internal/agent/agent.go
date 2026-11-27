@@ -32,8 +32,8 @@ type Message struct {
 }
 
 type Image struct {
-	MediaType string // image/png, image/jpeg, image/gif, image/webp
-	Data      []byte
+	MediaType string `json:"mediaType"` // image/png, image/jpeg, image/gif, image/webp
+	Data      []byte `json:"data"`      // base64 in JSON, as the browser sends and reads it
 }
 
 type Kind string
@@ -47,6 +47,7 @@ const (
 	KindPermission       Kind = "permission"        // Permission
 	KindPermissionCancel Kind = "permission_cancel" // RequestID: the CLI withdrew the request
 	KindTasks            Kind = "tasks"             // Tasks: the background tasks running now (may be none)
+	KindTaskInfo         Kind = "task_info"         // TaskInfo: more about one background task (task_started, task_progress)
 	KindResult           Kind = "result"            // Result: the turn is over
 	KindExit             Kind = "exit"              // Err: the process is gone; always last
 	KindOther            Kind = "other"             // status, rate limits, anything new
@@ -77,6 +78,8 @@ type Event struct {
 	Permission *PermissionRequest
 	RequestID  string // KindPermissionCancel
 	Tasks      []Task // KindTasks
+	TaskInfo   *Task  // KindTaskInfo: its ID and whatever else the line said
+	ToolCalls  []ToolCall // KindAssistant: the message's tool calls
 	Result     *Result
 	Err        error // KindExit
 
@@ -89,8 +92,29 @@ type Event struct {
 // the model, as long as its process is alive.
 type Task struct {
 	ID          string `json:"id"`
-	Type        string `json:"type"` // local_bash, ...
+	Type        string `json:"type"` // local_bash, local_agent, ...
 	Description string `json:"description"`
+
+	// What else is known about it, each optional: from the CLI's
+	// task_started and task_progress lines and from the tool call that
+	// started it (the runner merges them in by ID or ToolUseID).
+	ToolUseID string `json:"toolUseId,omitempty"`
+	Started   string `json:"started,omitempty"`  // RFC 3339: when it began, or when the server first heard of it
+	Subagent  string `json:"subagent,omitempty"` // an agent's subagent_type
+	Model     string `json:"model,omitempty"`    // the model the Agent call asked for (empty: the agent type's or the session's)
+	Command   string `json:"command,omitempty"`  // a background command's command line
+	Steps     int    `json:"steps,omitempty"`    // tool calls so far (task_progress)
+	Last      string `json:"last,omitempty"`     // its latest step: the CLI's summary, or the last tool's name
+	Running   int64  `json:"-"`                  // ms it had run at its last task_progress, to date Started
+}
+
+// ToolCall is a tool_use block in an assistant message: the inputs that
+// describe a background task it may start.
+type ToolCall struct {
+	ID, Name string
+	Model    string // Agent: its model input
+	Subagent string // Agent: its subagent_type
+	Command  string // Bash: its command
 }
 
 type PermissionRequest struct {

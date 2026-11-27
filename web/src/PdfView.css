@@ -1,0 +1,242 @@
+/* The PDF view's own styles: the pages, the text layer, find hits and
+   the status badges. Loaded with the view (PdfView.tsx), not with the app;
+   the tokens and the toolbar's buttons are in styles.css. */
+.pdf-count {
+  flex: none;
+  color: var(--text-2);
+  font-size: var(--t-sm);
+  font-variant-numeric: tabular-nums;
+  margin-right: var(--sp-1);
+}
+.badge {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Each with its shape (THEME 4): updating turns a ring, a problem is a
+   triangle. */
+.badge::before {
+  content: '';
+  display: inline-block;
+  width: var(--dot);
+  height: var(--dot);
+  margin-right: var(--sp-1);
+  vertical-align: -1px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: var(--r-full);
+  animation: badge-turn 1s linear infinite;
+}
+.badge.warn::before {
+  content: '▲';
+  width: auto;
+  height: auto;
+  border: 0;
+  animation: none;
+  vertical-align: 0;
+}
+/* On a phone the short form; the whole sentence is the tip. */
+.badge-short {
+  display: none;
+}
+@container (max-width: 439px) {
+  .badge-long {
+    display: none;
+  }
+  .badge-short {
+    display: inline;
+  }
+}
+.pdf-pages {
+  flex: 1;
+  overflow: auto;
+  /* Reserve the scrollbar from the start, so fit-width is not computed
+     on a width that shrinks once pages arrive. */
+  scrollbar-gutter: stable;
+  background: var(--raised);
+  padding: 0 var(--sp-3) env(safe-area-inset-bottom);
+  overscroll-behavior: contain;
+}
+.pdf-pages.fit {
+  overflow-x: hidden;
+}
+.pdf-page {
+  position: relative;
+  margin: var(--sp-3) auto 0;
+  background: #fff; /* paper, in both themes */
+  box-shadow: var(--shadow-1);
+}
+.pdf-page:last-child {
+  margin-bottom: var(--sp-3);
+}
+.pdf-canvas,
+.pdf-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.pdf-pages.syncing .pdf-page,
+.pdf-pages.syncing .textLayer span {
+  cursor: crosshair;
+}
+/* The page is white paper in both themes, so its link states use the
+   light theme's accent and focus (#2459b8, 6.6:1 on white), not the
+   theme's: the dark ones were a grey slab and a 2.2:1 ring there. */
+.pdf-page {
+  --focus: #2459b8;
+}
+.pdf-link {
+  position: absolute;
+  z-index: 2;
+}
+@media (hover: hover) {
+  .pdf-link:hover {
+    background: rgba(36, 89, 184, 0.12);
+    box-shadow: inset 0 -1px 0 #2459b8;
+  }
+}
+/* On a touch screen a link a line of small text tall gets a hit box at
+   least 24 px tall, centred on it. */
+@media (pointer: coarse) {
+  .pdf-link::after {
+    content: '';
+    position: absolute;
+    inset: 50% 0 auto;
+    height: max(100%, var(--ctl-sm));
+    translate: 0 -50%;
+  }
+}
+/* The spot a jump from the source landed on, and Find's match: the
+   highlighter. */
+.pdf-flash,
+.pdf-hit {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  border-radius: var(--r-xs);
+  background: color-mix(in srgb, var(--signature) 60%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--on-signature) 50%, transparent);
+  /* Under the ink, not over it: the page's black text stays black. */
+  mix-blend-mode: multiply;
+}
+.pdf-flash {
+  animation: pdf-flash 2.5s var(--ease-out) forwards;
+}
+.pdf-note {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+/* A flag to type stays whole ("-" / "synctex=1" read as a dash). */
+.pdf-note code {
+  white-space: nowrap;
+}
+/* On a phone the card keeps the column's inset (it ran edge to edge). */
+@media (max-width: 600px) {
+  .pdf-note {
+    margin-left: var(--sp-3);
+    margin-right: var(--sp-3);
+  }
+}
+@keyframes pdf-flash {
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* pdf.js's text layer: transparent text laid over the drawn page, so it
+   can be selected and copied. pdf.js sets --font-height, --scale-x and
+   --rotate on each span; the page sets --total-scale-factor. */
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  transform-origin: 0 0;
+  z-index: 1;
+  forced-color-adjust: none;
+}
+.textLayer span,
+.textLayer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.textLayer > :not(.markedContent),
+.textLayer .markedContent span:not(.markedContent) {
+  z-index: 1; /* above the end marker, which covers the page mid-drag */
+  font-size: calc(var(--total-scale-factor) * var(--font-height, 0px));
+  transform: rotate(var(--rotate, 0deg)) scaleX(var(--scale-x, 1));
+}
+.textLayer .markedContent {
+  display: contents;
+}
+.textLayer ::selection {
+  background: color-mix(in srgb, var(--cobalt) 25%, transparent);
+  color: transparent;
+}
+.textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+/* While a selection is being dragged, pdf.js marks the layer "selecting";
+   the end marker then covers the page, so dragging past the end of a line
+   does not run the selection on to the end of the page (seen in Chrome). */
+.textLayer.selecting .endOfContent {
+  top: 0;
+}
+/* The count's place while the PDF loads. */
+.pdf-count.pending {
+  color: var(--faint);
+}
+/* The page count over the pages on a phone (FindBar.css shows it there). */
+.pdf-count-float {
+  display: none;
+  position: absolute;
+  right: var(--sp-4);
+  bottom: calc(var(--sp-3) + env(safe-area-inset-bottom));
+  z-index: 4;
+  padding: var(--sp-half) var(--sp-2);
+  border-radius: var(--r-full);
+  background: var(--panel);
+  box-shadow: 0 0 0 1px var(--line), var(--shadow-2);
+  color: var(--text-2);
+  font-size: var(--t-sm);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  /* Shown while the pages move, then faded off the page's corner. */
+  opacity: 0;
+  transition: opacity var(--dur-2) var(--ease-out);
+}
+.pdf-count-float.on {
+  opacity: 1;
+}
+/* The zoom in the bar's group, between − and Fit: a fixed width. */
+.seg-level {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 6ch;
+  color: var(--text-2);
+  font-size: var(--t-sm);
+  font-variant-numeric: tabular-nums;
+  box-shadow: inset 1px 0 0 var(--line);
+}
+@container (max-width: 439px) {
+  .pdf-count-float {
+    display: block;
+  }
+}
+

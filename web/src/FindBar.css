@@ -1,0 +1,130 @@
+/* The find bar under a PDF's, a Word file's or a code file's toolbar
+   (FindBar.tsx, CodeView's findPanel), and the PDF and Word views' frame.
+   Loaded with those views, not with the app. */
+.pdf-view {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+/* Find: the bar under the PDF's or the Word file's. */
+.pdf-view:focus {
+  outline: none;
+}
+.pdf-find {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-half);
+  padding: 0 var(--sp-2) 0 var(--sp-3);
+  min-height: calc(var(--row) + 1px);
+  border-bottom: 1px solid var(--line);
+  background: var(--raised);
+  flex-shrink: 0;
+}
+/* 16 px, so iOS does not zoom in on it. */
+.pdf-find .filter {
+  flex: 1;
+  min-width: 0;
+  margin: var(--sp-1) var(--sp-1) var(--sp-1) 0;
+}
+/* The query selected in the box takes the text selection's blue, not the
+   highlighter that marks a match (beside "No matches" it read as one). */
+/* The ring drawn on the box's own edge, clear of the bar's rules. */
+.pdf-find .filter:focus-visible {
+  outline-offset: -1px;
+}
+/* With a mouse: a 36 px bar under the 36 px header, and the count in a
+   slot of its own width, so the arrows and close stay put as it changes. */
+@media (pointer: fine) {
+  .pdf-find .filter {
+    max-width: 320px;
+    margin-block: var(--sp-half);
+  }
+  .pdf-find .find-count {
+    min-width: 11ch;
+    text-align: right;
+  }
+}
+/* A code file's find bar (CodeView's findPanel): .* only with a mouse. */
+.code-find .find-opt.re {
+  font-family: var(--font-mono);
+}
+@media (pointer: coarse) {
+  .code-find .find-opt.re {
+    display: none;
+  }
+}
+.find-count {
+  flex: none;
+  padding: 0 var(--sp-1);
+  color: var(--text-2);
+  font-size: var(--t-sm);
+  font-variant-numeric: tabular-nums;
+}
+/* A narrow pane (a phone): the box takes the first row with only close
+   beside it, so a query is readable; the switches, the count and the
+   arrows go on a second row. */
+@container (max-width: 599px) {
+  .pdf-find {
+    flex-wrap: wrap;
+  }
+  .pdf-find .filter {
+    flex: 1 0 calc(100% - var(--row) - var(--sp-1) - 2px);
+  }
+  .pdf-find > :last-child {
+    order: 1;
+  }
+  .pdf-find > :not(.filter):not(:last-child) {
+    order: 2;
+  }
+  .pdf-find .find-count {
+    flex: 1;
+    text-align: right;
+  }
+}
+/* Find's switches: Aa (match case) and ab, underlined, for whole words. */
+.find-opt.word {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* A narrow bar (a phone): Download and a PDF's Source leave it for the ⋯
+   menu (ToolMenu.tsx; .wide-only and .narrow-only in styles.css). */
+@container (max-width: 439px) {
+  .seg .tbtn.narrow-last {
+    border-radius: 0 var(--r-full) var(--r-full) 0;
+    padding-inline-end: var(--sp-3);
+  }
+  /* The page count and zoom float over the pages instead (PdfView.css). */
+  .pdf-bar .pdf-count {
+    display: none;
+  }
+}
+/* Picking a spot for its source (PdfView): on a phone a 44 px row under
+   the bar, with Cancel; with the bar's Source button in sight (wider) its
+   pressed look says it, so the row is not shown. */
+.sync-note {
+  display: none;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: calc(var(--row) + 1px);
+  padding: 0 var(--sp-2) 0 var(--sp-3);
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--t-ui);
+  flex-shrink: 0;
+}
+.sync-note > svg {
+  flex: none;
+  color: var(--cobalt);
+}
+.sync-note .sync-cancel {
+  color: var(--cobalt);
+  font-weight: 500;
+}
+/* Picking a spot (from the ⋯ menu on a phone): the row says so. */
+@container (max-width: 439px) {
+  .sync-note {
+    display: flex;
+  }
+}

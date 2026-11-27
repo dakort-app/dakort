@@ -7,10 +7,17 @@ import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { getJSON, HTTPError } from './api'
 import { FindBar } from './FindBar'
-import { fileURL, DownloadButton, synctexURL, type Jump, type SyncBox } from './FileView'
+import { Crumb, downloadURL, fileURL, DownloadButton, mod, synctexURL, Tool, type Jump, type SyncBox } from './FileView'
+import { CloseIcon, DownloadIcon, FindIcon, FitPageIcon, FitWidthIcon, MinusIcon, PlusIcon, SyncIcon } from './viewicons'
+import { ToolMenu } from './ToolMenu'
 import { find, foldQuery, pageText, type FindOpts, type Hit, type PageText, type Run } from './pdffind'
 import { GAP, posAt, scrollFor, tops, type Pos } from './pdfpos'
 import { useStore } from './store'
+import './FindBar.css'
+import './PdfView.css'
+import { cn } from '@/lib/utils'
+import { segList } from '@/lib/seg'
+import { Badge } from '@/components/ui/badge'
 
 // The PDF tab, for the LaTeX loop: Claude recompiles, the view refreshes
 // and stays on the same spot. A new version is only shown once it is
@@ -59,17 +66,42 @@ function fitScale(mode: 'fit' | 'page', sizes: Size[], width: number, height: nu
   return mode === 'page' ? Math.min(byWidth, (height - 2 * GAP) / Math.max(...sizes.map((s) => s.h))) : byWidth
 }
 
+// Where each character of a run starts, in the run's own width: the
+// characters measured in the font family pdf.js names for the run (the one
+// its text layer draws the selectable text in), scaled to the run's width.
+// Taking every character as equally wide put a match a character or two
+// off on proportional text.
+let measurer: CanvasRenderingContext2D | null = null
+const widths = new Map<string, number>()
+function advances(str: string, family: string, w: number): number[] | undefined {
+  measurer ??= document.createElement('canvas').getContext('2d')
+  if (!measurer || !str) return undefined
+  measurer.font = `100px ${family}`
+  const out = [0]
+  for (const c of str) {
+    const k = family + '\n' + c
+    let cw = widths.get(k)
+    if (cw === undefined) widths.set(k, (cw = measurer.measureText(c).width))
+    out.push(out[out.length - 1] + cw)
+    if (c.length === 2) out.push(out[out.length - 1]) // a surrogate pair is two string positions
+  }
+  const total = out[out.length - 1]
+  return total > 0 ? out.map((v) => (v / total) * w) : undefined
+}
+
 // A page's text runs, placed in PDF points from the page's top-left.
 async function runsOf(pdf: PDFDocumentProxy, index: number): Promise<Run[]> {
   const page = await pdf.getPage(index + 1)
   const vp = page.getViewport({ scale: 1 })
   const out: Run[] = []
-  for (const it of (await page.getTextContent()).items) {
+  const content = await page.getTextContent()
+  for (const it of content.items) {
     if (!('str' in it)) continue
     const t = it.transform as number[]
     const h = it.height || Math.hypot(t[2], t[3])
     const [x, y] = vp.convertToViewportPoint(t[4], t[5]) as number[]
-    out.push({ str: it.str, x, top: y - h, w: it.width, h, eol: it.hasEOL })
+    const family = content.styles[it.fontName]?.fontFamily ?? 'sans-serif'
+    out.push({ str: it.str, x, top: y - h, w: it.width, h, eol: it.hasEOL, adv: advances(it.str, family, it.width) })
   }
   return out
 }
@@ -312,7 +344,9 @@ export function PdfView({ root, path, target, onSource }: Props) {
       if (r.outside || !r.path) setNote('That text comes from a file outside this project (a class or package).')
       else onSource(r.path, r.line)
     } catch (e) {
-      setNote(e instanceof Error ? e.message : String(e))
+      const m = e instanceof Error ? e.message : String(e)
+      // The server's "no SyncTeX data: compile with -synctex=1", in words.
+      setNote(/no synctex/i.test(m) ? 'synctex' : 'Could not find the source: ' + m.replace(/\.?$/, '.'))
     }
   }
 
@@ -333,7 +367,22 @@ export function PdfView({ root, path, target, onSource }: Props) {
     }
   }
 
+  // The phone's floating page count shows while the pages move (a scroll,
+  // a zoom, the PDF arriving) and fades 1.5 s after, off the page's corner.
+  const [moving, setMoving] = useState(false)
+  const still = useRef(0)
+  const poke = () => {
+    setMoving(true)
+    clearTimeout(still.current)
+    still.current = window.setTimeout(() => setMoving(false), 1500)
+  }
+  useEffect(() => {
+    if (doc) poke()
+  }, [doc, zoom])
+  useEffect(() => () => clearTimeout(still.current), [])
+
   const onScroll = () => {
+    poke()
     const el = box.current!
     if (!el.clientHeight) return // hidden; the scroll to 0 is not the reader's
     pos.current = posAt(heights, el.scrollTop + el.clientHeight / 2)
@@ -443,34 +492,58 @@ export function PdfView({ root, path, target, onSource }: Props) {
       }}
     >
       <div className="pdf-bar">
-        <span className="small faint">{doc ? `${page + 1} / ${doc.sizes.length}` : ''}</span>
-        {status === 'updating' && <span className="badge">updating…</span>}
-        {status === 'missing' && <span className="badge warn">file missing; showing the last version</span>}
-        {status === 'error' && <span className="badge warn" title={err}>could not load the new version</span>}
-        <span className="grow ellipsis small faint" title={path}>
-          {path}
-        </span>
-        <button
-          className={'btn small-btn' + (syncing ? ' on' : '')}
+        {/* A dash while loading holds the count's place, so the path does
+            not jump 27 px as the PDF arrives. */}
+        <span className={'pdf-count' + (doc ? '' : ' pending')}>{doc ? `${page + 1} / ${doc.sizes.length}` : '– / –'}</span>
+        {/* The whole sentence, or on a phone a short form that fits with
+            the sentence in its tip (a tap shows it). */}
+        {status === 'updating' && <Badge variant="secondary" className="badge">Updating…</Badge>}
+        {status === 'missing' && (
+          <Badge variant="outline" className="badge warn text-[var(--warn)]" data-tip="Last version shown" data-tip-tap="">
+            <span className="badge-long">File missing, showing the last version</span>
+            <span className="badge-short">Last version</span>
+          </Badge>
+        )}
+        {status === 'error' && (
+          <Badge variant="outline" className="badge warn text-[var(--warn)]" data-tip={'Could not load the new version: ' + err} data-tip-tap="">
+            <span className="badge-long">Could not load the new version</span>
+            <span className="badge-short">Not updated</span>
+          </Badge>
+        )}
+        <Crumb path={path} />
+        <Tool
+          label="Source"
+          tip={`Source: tap a spot to open its source line (or ${mod === '⌘' ? '⌘-click' : 'Ctrl+click'} it)`}
+          icon={<SyncIcon />}
+          on={syncing}
+          className="wide-only"
           onClick={() => setSyncing(!syncing)}
-          title="Tap a spot to open its source line (or Ctrl+click it)"
-        >
-          {syncing ? 'Tap a spot…' : 'Source'}
-        </button>
-        <button className={'btn small-btn' + (finding ? ' on' : '')} onClick={() => (finding ? closeFind() : openFind())} title="Find in the PDF (Ctrl+F)">
-          Find
-        </button>
-        <button className="btn small-btn" onClick={() => zoomBy(1 / 1.2)} aria-label="Zoom out">
-          −
-        </button>
-        {/* Named for what a click does, not for the current fit. */}
-        <button className="btn small-btn" onClick={fit} title={zoom === 'fit' ? 'Show the whole page' : 'Fit the page width'}>
-          {zoom === 'fit' ? 'Fit page' : 'Fit width'}
-        </button>
-        <button className="btn small-btn" onClick={() => zoomBy(1.2)} aria-label="Zoom in">
-          +
-        </button>
-        <DownloadButton root={root} path={path} />
+        />
+        <span className={cn('seg', segList)}>
+          <Tool label="Find" keys="Mod+F" icon={<FindIcon />} on={finding} onClick={() => (finding ? closeFind() : openFind())} />
+          <Tool label="Zoom out" icon={<MinusIcon />} className="bare" onClick={() => zoomBy(1 / 1.2)} />
+          {/* The zoom, in the group as viewers show it: a fixed slot, so
+              nothing moves as it changes. (A phone's is in the floating count.) */}
+          <span className="seg-level wide-only" aria-label={`Zoom ${Math.round(scale * 100)}%`}>
+            {doc ? Math.round(scale * 100) + '%' : '–'}
+          </span>
+          {/* Named for what a click does, not for the current fit. */}
+          <Tool
+            label={zoom === 'fit' ? 'Fit page' : 'Fit width'}
+            tip={zoom === 'fit' ? 'Fit page: show the whole page' : 'Fit width: the page as wide as the view'}
+            icon={zoom === 'fit' ? <FitPageIcon /> : <FitWidthIcon />}
+            onClick={fit}
+          />
+          <Tool label="Zoom in" icon={<PlusIcon />} className="bare narrow-last" onClick={() => zoomBy(1.2)} />
+          <DownloadButton root={root} path={path} className="wide-only" />
+        </span>
+        <ToolMenu
+          title={path.split('/').pop()!}
+          tools={[
+            { label: syncing ? 'Stop picking a spot' : 'Source: tap a spot', icon: <SyncIcon />, onPick: () => setSyncing(!syncing) },
+            { label: 'Download', icon: <DownloadIcon />, href: downloadURL(root, path), download: path.split('/').pop() },
+          ]}
+        />
       </div>
       {finding && (
         <FindBar
@@ -492,10 +565,36 @@ export function PdfView({ root, path, target, onSource }: Props) {
           input={findBox}
         />
       )}
-      {note && (
-        <div className="notice info clickable" onClick={() => setNote('')}>
-          {note}
+      {/* Picking a spot for its source: said plainly, with a way out, as the
+          Source button that shows it is in the ⋯ menu on a phone. */}
+      {syncing && (
+        <div className="sync-note" role="status">
+          <SyncIcon />
+          <span className="grow">Tap a spot to see its source</span>
+          <Tool label="Cancel" icon={null} text className="sync-cancel" onClick={() => setSyncing(false)} />
         </div>
+      )}
+      {note && (
+        // Announced: it is the only answer to a tap in Source mode.
+        <div className="notice info pdf-note" role={note.startsWith('Could not') ? 'alert' : 'status'}>
+          <span className="grow">
+            {note === 'synctex' ? (
+              <>
+                This PDF has no SyncTeX data. Build it with <code>-synctex=1</code> to jump from it to its source.
+              </>
+            ) : (
+              note
+            )}
+          </span>
+          <Tool label="Dismiss" icon={<CloseIcon />} className="bare" onClick={() => setNote('')} />
+        </div>
+      )}
+      {/* A phone's bar has no room for the page count: it floats over the pages. */}
+      {doc && (
+        <span className={'pdf-count-float' + (moving ? ' on' : '')} aria-hidden="true">
+          p. {page + 1} / {doc.sizes.length}
+          {typeof zoom === 'number' && ` · ${Math.round(scale * 100)}%`}
+        </span>
       )}
       <div className={'pdf-pages' + (typeof zoom === 'number' ? '' : ' fit') + (syncing ? ' syncing' : '')} ref={box} onScroll={onScroll}>
         {!doc && <div className="center faint">{status === 'missing' ? 'The file is gone.' : err || 'Loading…'}</div>}
@@ -520,7 +619,21 @@ export function PdfView({ root, path, target, onSource }: Props) {
   )
 }
 
-type Link = { left: number; top: number; width: number; height: number; url?: string; dest?: unknown }
+// name: what the link says it does, its accessible name and its tip (the
+// address, or the page it goes to).
+type Link = { left: number; top: number; width: number; height: number; url?: string; dest?: unknown; name: string }
+
+// The page (from 0) a link inside the document goes to, or -1.
+async function destPage(doc: Doc, dest: unknown) {
+  try {
+    const explicit = typeof dest === 'string' ? await doc.pdf.getDestination(dest) : (dest as unknown[])
+    const ref = explicit?.[0]
+    if (ref == null) return -1
+    return typeof ref === 'number' ? ref : await doc.pdf.getPageIndex(ref as { num: number; gen: number })
+  } catch {
+    return -1
+  }
+}
 
 // Only these leave the app from a PDF link; anything else (javascript:,
 // file:, launch actions) is dropped.
@@ -600,8 +713,11 @@ function PdfPage({ doc, index, w, h, scale, scroller, flash, hit, onPick, onDest
         if (a.url && !safeURL(a.url)) continue
         const [x1, y1] = vp.convertToViewportPoint(a.rect[0], a.rect[1]) as number[]
         const [x2, y2] = vp.convertToViewportPoint(a.rect[2], a.rect[3]) as number[]
-        out.push({ left: Math.min(x1, x2), top: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1), url: a.url, dest: a.dest })
+        const page = a.url ? -1 : await destPage(doc, a.dest)
+        const name = a.url ? a.url.replace(/^mailto:/i, 'Email ') : page >= 0 ? `Go to page ${page + 1}` : 'Go to a place in this document'
+        out.push({ left: Math.min(x1, x2), top: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1), url: a.url, dest: a.dest, name })
       }
+      if (dead) return
       setLinks(out)
     })().catch(() => {})
     return () => {
@@ -628,6 +744,8 @@ function PdfPage({ doc, index, w, h, scale, scroller, flash, hit, onPick, onDest
           className="pdf-link"
           style={{ left: l.left, top: l.top, width: l.width, height: l.height }}
           href={l.url ?? '#'}
+          aria-label={l.name}
+          data-tip={l.name}
           target={l.url ? '_blank' : undefined}
           rel="noopener noreferrer"
           onClick={(e) => {

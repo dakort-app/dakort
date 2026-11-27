@@ -1,11 +1,23 @@
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { AskHost } from './ask'
 import { startStore } from './store'
-import './styles.css'
+import { startKeyboard } from './keyboard'
+import { startModal } from './modal'
+import { startTips } from './tips'
+import './index.css'
 import './theme'
 
 startStore()
-createRoot(document.getElementById('root')!).render(<App />)
+startTips()
+startKeyboard()
+startModal()
+createRoot(document.getElementById('root')!).render(
+  <>
+    <App />
+    <AskHost />
+  </>,
+)
 
 // No service worker: one that a phone installed from an earlier version is
 // removed with its saved copies (see public/sw.js). The home-screen app

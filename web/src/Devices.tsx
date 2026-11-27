@@ -1,6 +1,12 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { api, HTTPError } from './api'
 import type { DevicesState } from './api'
+import { CheckIcon, CloseIcon, CopyIcon } from './icons'
+import { scrolledEdge } from './a11y'
+import { copyText } from './clip'
+import { Button } from '@/components/ui/button'
+import { sheetBack, sheetPanel } from '@/lib/dialog'
+import { Input } from '@/components/ui/input'
 
 // The Other devices panel, behind the icon beside the moon: where a phone
 // or another computer reaches this one, and the password it logs in with.
@@ -25,9 +31,10 @@ export function Devices({ onClose }: { onClose: () => void }) {
     load()
   }, [])
 
+  const differ = 'The two passwords differ.'
   const save = async () => {
     if (p1 !== p2) {
-      setErr('The two passwords differ.')
+      setErr(differ)
       return
     }
     setBusy(true)
@@ -39,14 +46,39 @@ export function Devices({ onClose }: { onClose: () => void }) {
       setChanging(false)
       await load()
     } catch (e) {
-      setErr(e instanceof HTTPError ? e.message : String(e))
+      // In words, as a sentence: the server's own reason, or what went wrong.
+      const m = e instanceof HTTPError ? e.message : ''
+      setErr(m ? m.charAt(0).toUpperCase() + m.slice(1).replace(/\.?$/, '.') : 'The password could not be saved. Check the connection and try again.')
     } finally {
       setBusy(false)
     }
   }
 
   const choosing = st && (!st.passwordSet || changing)
-  let body = <p className="faint">…</p>
+  let body = <p className="faint">Loading…</p>
+  if (!st && err) {
+    // In the app's words first, then the server's reason, and a way on.
+    body = (
+      <>
+        <div className="form-err" role="alert">
+          Could not read this computer’s addresses.
+          <div className="form-err-why">{err}</div>
+        </div>
+        <div>
+          <Button
+            type="button"
+ variant="outline" size="sm"
+            onClick={() => {
+              setErr('')
+              load()
+            }}
+          >
+            Try again
+          </Button>
+        </div>
+      </>
+    )
+  }
   if (st && choosing) {
     body = (
       <form
@@ -61,17 +93,46 @@ export function Devices({ onClose }: { onClose: () => void }) {
           At least 8 characters. Each device logs in with it once and stays logged in.
           {st.passwordSet ? ' Devices already logged in stay logged in.' : ''}
         </p>
-        <input className="devices-input" type="password" autoComplete="new-password" placeholder="Password" value={p1} onChange={(e) => setP1(e.target.value)} autoFocus aria-label="Password" />
-        <input className="devices-input" type="password" autoComplete="new-password" placeholder="The same again" value={p2} onChange={(e) => setP2(e.target.value)} aria-label="The same again" />
+        <Input className="devices-input" type="password" autoComplete="new-password" placeholder="Password" value={p1} onChange={(e) => setP1(e.target.value)} autoFocus aria-label="Password" />
+        <Input
+          className="devices-input"
+          type="password"
+          autoComplete="new-password"
+          placeholder="The same again"
+          value={p2}
+          onChange={(e) => {
+            setP2(e.target.value)
+            if (err === differ && e.target.value === p1) setErr('')
+          }}
+          aria-label="The same again"
+          aria-invalid={err === differ}
+          aria-describedby={err ? 'devices-err' : undefined}
+        />
+        {/* Under the field it is about, above the buttons and the keyboard. */}
+        {err && (
+          <p className="form-err" id="devices-err" role="alert">
+            {err}
+          </p>
+        )}
         <div className="row-buttons">
           {st.passwordSet && (
-            <button className="btn" type="button" onClick={() => setChanging(false)}>
+            <Button
+ variant="outline" size="sm"
+              type="button"
+              onClick={() => {
+                // Cancel leaves nothing behind: no error, no typed password.
+                setChanging(false)
+                setErr('')
+                setP1('')
+                setP2('')
+              }}
+            >
               Cancel
-            </button>
+            </Button>
           )}
-          <button className="btn primary" type="submit" disabled={busy || p1.length < 8}>
+          <Button variant="default" size="sm" type="submit" disabled={busy || p1.length < 8}>
             {busy ? 'Saving…' : 'Set password'}
-          </button>
+          </Button>
         </div>
       </form>
     )
@@ -95,10 +156,8 @@ export function Devices({ onClose }: { onClose: () => void }) {
         {main && (
           <>
             <p>On your phone or another computer, with Tailscale on and the same account, open</p>
-            <a className="devices-addr" href={main.url} target="_blank" rel="noopener noreferrer">
-              {main.url}
-            </a>
-            <p>or scan this with the phone's camera.</p>
+            <Address url={main.url} />
+            <p>or scan this code with the other device’s camera.</p>
             <img className="devices-qr" src={'/api/devices/qr?url=' + encodeURIComponent(main.url)} alt={'QR code of ' + main.url} />
           </>
         )}
@@ -106,36 +165,71 @@ export function Devices({ onClose }: { onClose: () => void }) {
           <>
             <p>On this network, without Tailscale, open</p>
             {exposed.map((a) => (
-              <a key={a.url} className="devices-addr" href={a.url} target="_blank" rel="noopener noreferrer">
-                {a.url}
-              </a>
+              <Address key={a.url} url={a.url} />
             ))}
             <p className="warn small">Anyone on that network gets the login page. The password is all that guards this computer.</p>
           </>
         )}
-        <p className="faint small">
-          <button className="linkish" onClick={() => setChanging(true)}>
+        <div>
+          <Button variant="outline" size="sm" onClick={() => setChanging(true)}>
             Change password
-          </button>
-        </p>
+          </Button>
+        </div>
       </>
     )
   }
   return (
-    <div className="sheet-back" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+    <div className={sheetBack()} onClick={onClose}>
+      <div className={sheetPanel()} role="dialog" aria-label="Other devices" ref={scrolledEdge} onClick={(e) => e.stopPropagation()}>
         <header className="bar">
           <b>Other devices</b>
           <span className="grow" />
-          <button className="icon" onClick={onClose} aria-label="Close">
-            ×
-          </button>
+          <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-foreground" onClick={onClose} aria-label="Close">
+            <CloseIcon />
+          </Button>
         </header>
         <div className="devices">
           {body}
-          {err && <p className="error">{err}</p>}
+          {err && st && !choosing && <p className="error">{err}</p>}
         </div>
       </div>
     </div>
+  )
+}
+
+// Address is an address to open on the other device, in a field with a
+// Copy button: copying it is what the panel is for, and as a bare link it
+// broke mid-word.
+function Address({ url }: { url: string }) {
+  return (
+    <div className="addr-field">
+      <a className="devices-addr" href={url} target="_blank" rel="noopener noreferrer">
+        {/* Lines break after a dot, a slash or a colon only: never inside a
+            word, and never at a hyphen, which a reader would take for the
+            line's own and drop when typing it. */}
+        {url.split(/(?<=[./:])/).map((part, i) => (
+          <Fragment key={i}>
+            {i > 0 && <wbr />}
+            <span className="nobreak">{part}</span>
+          </Fragment>
+        ))}
+      </a>
+      <CopyButton text={url} what="the address" />
+    </div>
+  )
+}
+
+// CopyButton copies text, and shows a check for 2 s once it has.
+export function CopyButton({ text, what }: { text: string; what: string }) {
+  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    if (!copied) return
+    const t = window.setTimeout(() => setCopied(false), 2000)
+    return () => clearTimeout(t)
+  }, [copied])
+  return (
+    <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-foreground" onClick={() => copyText(text).then(setCopied)} aria-label={copied ? 'Copied' : 'Copy ' + what} title={'Copy ' + what}>
+      {copied ? <CheckIcon /> : <CopyIcon />}
+    </Button>
   )
 }

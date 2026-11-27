@@ -1,7 +1,10 @@
 import ExcelJS from 'exceljs'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEdges } from './edges'
 import { fileURL } from './FileView'
 import { cssColour, formatValue, plainValue, themeColours, type Colour } from './sheetfmt'
+import './SheetView.css'
+import { Button } from '@/components/ui/button'
 
 // An Excel workbook read in the browser by ExcelJS and drawn as a table
 // per sheet: fills, bold and italic, text colours (ARGB, the legacy
@@ -102,7 +105,10 @@ export function SheetView({ root, path, version, size }: Props) {
   const [err, setErr] = useState('')
   const [cur, setCur] = useState(0)
   const [all, setAll] = useState(false)
+  const [said, setSaid] = useState('') // Show all's answer, for a screen reader
   const box = useRef<HTMLDivElement>(null)
+  // More of the sheet past an edge: that edge fades.
+  const edges = useEdges(box, [sheets, cur])
 
   useEffect(() => {
     if (!version || size > maxSheetBytes) return
@@ -148,69 +154,89 @@ export function SheetView({ root, path, version, size }: Props) {
 
   return (
     <div className="file-sheet">
-      <div className="sheet-box" ref={box}>
-        <table className="sheet-table" style={{ width: sheet.widths.reduce((a, b) => a + b, 0) + rnW * 8 + 'px' }}>
-          <colgroup>
-            <col style={{ width: rnW + 'ch' }} />
-            {sheet.widths.map((w, c) => (
-              <col key={c} style={{ width: w + 'px' }} />
-            ))}
-          </colgroup>
-          <thead>
-            <tr>
-              <th className="rn" />
-              {sheet.widths.map((_, c) => (
-                <th key={c}>{colName(c + 1)}</th>
+      {/* Focusable, so the keys scroll it (Safari does not focus a scroller
+          by itself), and where Show all leaves the focus. */}
+      <div className="sheet-box" ref={box} tabIndex={0} role="region" aria-label={sheet.name} onScroll={edges.measure} {...edges.attrs}>
+        <div className="sheet-paper">
+          <table className="sheet-table" style={{ width: sheet.widths.reduce((a, b) => a + b, 0) + rnW * 8 + 'px' }}>
+            <colgroup>
+              <col style={{ width: rnW + 'ch' }} />
+              {sheet.widths.map((w, c) => (
+                <col key={c} style={{ width: w + 'px' }} />
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((row, r) => (
-              <tr key={r}>
-                <td className="rn">{r + 1}</td>
-                {row.map((cell, c) =>
-                  cell === null ? null : (
-                    <td
-                      key={c}
-                      colSpan={cell.colSpan > 1 ? cell.colSpan : undefined}
-                      rowSpan={cell.rowSpan > 1 ? cell.rowSpan : undefined}
-                      title={cell.title}
-                      style={{
-                        background: cell.bg || undefined,
-                        color: cell.fg || undefined,
-                        fontWeight: cell.bold ? 700 : undefined,
-                        fontStyle: cell.italic ? 'italic' : undefined,
-                        textAlign: cell.align,
-                      }}
-                    >
-                      {cell.text}
-                    </td>
-                  ),
-                )}
+            </colgroup>
+            <thead>
+              <tr>
+                <th className="rn" />
+                {sheet.widths.map((_, c) => (
+                  <th key={c}>{colName(c + 1)}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {shown.map((row, r) => (
+                <tr key={r}>
+                  <td className="rn">{r + 1}</td>
+                  {row.map((cell, c) =>
+                    cell === null ? null : (
+                      <td
+                        key={c}
+                        colSpan={cell.colSpan > 1 ? cell.colSpan : undefined}
+                        rowSpan={cell.rowSpan > 1 ? cell.rowSpan : undefined}
+                        title={cell.title}
+                        style={{
+                          background: cell.bg || undefined,
+                          color: cell.fg || undefined,
+                          fontWeight: cell.bold ? 700 : undefined,
+                          fontStyle: cell.italic ? 'italic' : undefined,
+                          textAlign: cell.align,
+                        }}
+                      >
+                        {cell.text}
+                      </td>
+                    ),
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
       <div className="sheet-foot small">
         {sheets!.length > 1 && (
           <span className="sheet-tabs" role="tablist">
             {sheets!.map((s, i) => (
-              <button key={s.name} role="tab" aria-selected={i === cur} className={'sheet-tab' + (i === cur ? ' on' : '')} onClick={() => setCur(i)}>
+              <button key={s.name} role="tab" aria-selected={i === cur} className={'sheet-tab' + (i === cur ? ' on' : '')} onClick={() => {
+                  setCur(i)
+                  setSaid('')
+                }}>
                 {s.name}
               </button>
             ))}
           </span>
         )}
-        <span className="faint grow ellipsis">
+        <span className="sheet-note">
           {sheet.nrows.toLocaleString()} {sheet.nrows === 1 ? 'row' : 'rows'} × {sheet.ncols} {sheet.ncols === 1 ? 'column' : 'columns'}
           {sheet.noResult > 0 && ` · ${sheet.noResult} formula ${sheet.noResult === 1 ? 'cell has' : 'cells have'} no computed value (the file was never opened in a spreadsheet program)`}
         </span>
         {!all && sheet.nrows > firstRows && (
-          <button className="btn small-btn" onClick={() => setAll(true)} title={`Showing the first ${firstRows.toLocaleString()} rows`}>
+          // The button goes as it is pressed: the focus moves to the grid,
+          // where the new rows are, and the count is said.
+          <Button
+ variant="outline" size="xs"
+            onClick={() => {
+              setAll(true)
+              setSaid(`Showing all ${sheet.nrows.toLocaleString()} rows`)
+              box.current?.focus({ preventScroll: true })
+            }}
+            title={`Showing the first ${firstRows.toLocaleString()} rows`}
+          >
             Show all
-          </button>
+          </Button>
         )}
+        <span className="sr-only" role="status">
+          {said}
+        </span>
       </div>
     </div>
   )

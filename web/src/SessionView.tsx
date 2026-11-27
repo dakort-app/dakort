@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { Composer, type FilesIn } from './Composer'
+import { Mark } from './mark'
 import { PermissionCard } from './PermissionCard'
-import { PromptText } from './PromptText'
 import { showing, useStore } from './store'
-import { Transcript } from './Transcript'
+import { Transcript, WaitingPrompt } from './Transcript'
 import type { Session } from './types'
 
 // A session tab: the transcript, a permission question when the CLI asks
@@ -66,13 +66,17 @@ export function SessionView({ id, session, folder, onStarted }: Props) {
       ) : (
         <div className="transcript">
           {pendingNew.map((p) => (
-            <div key={p.id} className="item-wrap">
-              <div className="prompt pending">
-                <PromptText text={p.text} />
-              </div>
-            </div>
+            <WaitingPrompt key={p.id} p={p} />
           ))}
-          {!pendingNew.length && <div className="center faint">A new session starts in {folder}.</div>}
+          {!pendingNew.length && (
+            <div className="center new-session">
+              <Mark className="new-session-mark" />
+              <div className="new-session-title" title={folder}>
+                New session in {folder.split(/[\\/]/).filter(Boolean).pop() || folder}
+              </div>
+              <div className="new-session-hint">Pick a model below and say what to do.</div>
+            </div>
+          )}
         </div>
       )}
       {perms && perms.length > 0 && <PermissionCard key={perms[0].id} session={id} perm={perms[0]} more={perms.length - 1} />}

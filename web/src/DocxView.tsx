@@ -1,8 +1,14 @@
 import { renderAsync } from 'docx-preview'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FindBar } from './FindBar'
-import { fileURL, DownloadButton } from './FileView'
+import { Crumb, downloadURL, fileURL, DownloadButton, Tool } from './FileView'
+import { DownloadIcon, FindIcon, FitWidthIcon, MinusIcon, PlusIcon } from './viewicons'
+import { ToolMenu } from './ToolMenu'
 import { foldQuery, pageText, spans, type FindOpts } from './pdffind'
+import './FindBar.css'
+import './DocxView.css'
+import { cn } from '@/lib/utils'
+import { segList } from '@/lib/seg'
 
 // A Word file drawn in the browser by docx-preview: pages as Word lays
 // them out, near enough (fonts the browser lacks are substituted). A new
@@ -46,6 +52,7 @@ function mark(all: Range[], cur: Range | undefined) {
 export function DocxView({ root, path, version }: Props) {
   const box = useRef<HTMLDivElement>(null)
   const pages = useRef<HTMLDivElement>(null)
+  const sizer = useRef<HTMLDivElement>(null)
   const [err, setErr] = useState('')
   const [ready, setReady] = useState(false)
   const [zoom, setZoom] = useState<Zoom>('fit')
@@ -63,16 +70,24 @@ export function DocxView({ root, path, version }: Props) {
     const p = pages.current
     if (!b || !p) return
     // A transform, not zoom: WebKit's zoom dropped the thin table borders.
-    // A transform keeps the layout size, so the box is given the shrunk
-    // height by hand; an enlarged one overflows, and scrolls, by itself.
+    // A transform keeps the layout size, which the scroller counted: a
+    // phone at Fit could be swiped 476 px sideways into empty grey. So the
+    // pages sit in a box (sizer) of their scaled size that clips the rest.
     const page = p.querySelector<HTMLElement>('section.docx')
     if (!page) return
     const z = zoomRef.current
-    const k = z === 'fit' ? Math.min(1, (b.clientWidth - 16) / page.offsetWidth) : z
+    // Fitted with 12 px each side, as a PDF's pages; --k lets the CSS keep
+    // the gaps 12 px on screen whatever the scale.
+    const k = z === 'fit' ? Math.min(1, (b.clientWidth - 24) / page.offsetWidth) : z
     scaleRef.current = k
+    p.style.setProperty('--k', String(k))
     p.style.transform = k !== 1 ? `scale(${k})` : ''
-    p.style.width = k !== 1 ? `${100 / k}%` : ''
-    p.style.marginBottom = k < 1 ? `${-(1 - k) * p.offsetHeight}px` : ''
+    // As wide as the view, or as the page and its margins when zoomed past it.
+    const w = Math.max(b.clientWidth, page.offsetWidth * k + 24)
+    p.style.width = `${w / k}px`
+    const s = sizer.current!
+    s.style.width = `${w}px`
+    s.style.height = `${p.offsetHeight * k}px`
   }
 
   useEffect(() => {
@@ -201,22 +216,20 @@ export function DocxView({ root, path, version }: Props) {
       }}
     >
       <div className="pdf-bar">
-        <span className="grow ellipsis small faint" title={path}>
-          {path}
+        <Crumb path={path} />
+        <span className={cn('seg', segList)}>
+          <Tool label="Find" keys="Mod+F" icon={<FindIcon />} on={finding} onClick={() => (finding ? closeFind() : openFind())} />
+          <Tool label="Zoom out" icon={<MinusIcon />} className="bare" onClick={() => zoomBy(1 / 1.2)} />
+          <Tool label="Fit" tip="Fit the width (never larger than the page)" icon={<FitWidthIcon />} onClick={() => setZoom('fit')} />
+          <Tool label="Zoom in" icon={<PlusIcon />} className="bare narrow-last" onClick={() => zoomBy(1.2)} />
+          <DownloadButton root={root} path={path} className="wide-only" />
         </span>
-        <button className={'btn small-btn' + (finding ? ' on' : '')} onClick={() => (finding ? closeFind() : openFind())} title="Find in the document (Ctrl+F)">
-          Find
-        </button>
-        <button className="btn small-btn" onClick={() => zoomBy(1 / 1.2)} aria-label="Zoom out">
-          −
-        </button>
-        <button className={'btn small-btn'} onClick={() => setZoom('fit')} title="Fit the width (never larger than the page)">
-          Fit
-        </button>
-        <button className="btn small-btn" onClick={() => zoomBy(1.2)} aria-label="Zoom in">
-          +
-        </button>
-        <DownloadButton root={root} path={path} />
+        <ToolMenu
+          title={path.split('/').pop()!}
+          tools={[
+            { label: 'Download', icon: <DownloadIcon />, href: downloadURL(root, path), download: path.split('/').pop() },
+          ]}
+        />
       </div>
       {finding && (
         <FindBar
@@ -241,7 +254,9 @@ export function DocxView({ root, path, version }: Props) {
       <div className="file-docx" ref={box}>
         {err && <div className="notice error small">{err}</div>}
         {!ready && !err && <div className="center faint">Loading…</div>}
-        <div ref={pages} />
+        <div className="docx-sizer" ref={sizer}>
+          <div ref={pages} />
+        </div>
       </div>
     </div>
   )

@@ -228,27 +228,59 @@ const loginHTML = `<!doctype html>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Dakort">
-<meta name="theme-color" content="#f8f8f8">
+<meta name="theme-color" content="#fdfcfa">
 <title>Dakort</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest">
+<script>
+// The app's theme on this device if it has one, else the system's.
+(function () {
+  var t = null
+  try { t = localStorage.getItem('dakort.theme') } catch (e) {}
+  if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  document.documentElement.dataset.theme = t
+  if (t === 'dark') document.querySelector('meta[name=theme-color]').content = '#1c1b19'
+})()
+</script>
 <style>
-  body { font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; display: grid; place-items: center; min-height: 100dvh; background: #f8f8f8; color: #1f1f1f; }
-  form { background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; padding: 24px; width: min(320px, 88vw); }
-  h1 { font-size: 18px; margin: 0 0 12px; }
-  input { font: inherit; width: 100%; box-sizing: border-box; padding: 8px 10px; margin: 6px 0; border: 1px solid #ccc; border-radius: 6px; }
-  button { font: inherit; width: 100%; padding: 8px; margin-top: 8px; border: 0; border-radius: 6px; background: #005fb8; color: #fff; }
-  p { margin: 6px 0; font-size: 14px; }
-  .err { color: #c72e2e; } .faint { color: #6f6f6f; } [hidden] { display: none; }
+* { -webkit-tap-highlight-color: transparent; } button:active { background-image: linear-gradient(rgba(0,0,0,.2), rgba(0,0,0,.2)); } :root[data-theme=dark] button:active { background-image: linear-gradient(rgba(255,255,255,.28), rgba(255,255,255,.28)); }
+  :root { --frame: #f3f1ed; --panel: #fdfcfa; --line: #e2ded7; --line-strong: #8a857c; --text: #201e1b; --text-2: #4f4b45; --faint: #67625a; --accent: #2459b8; --on-accent: #ffffff; --err: #b3302a; --shadow: 0 1px 2px rgba(32,30,27,.05), 0 6px 20px -6px rgba(32,30,27,.14); color-scheme: light; }
+  :root[data-theme=dark] { --frame: #141311; --panel: #1c1b19; --line: #383532; --line-strong: #7a756d; --text: #e6e3de; --text-2: #b9b4ab; --faint: #9a958c; --accent: #86b0f5; --on-accent: #0d1a33; --err: #f2766a; --shadow: 0 0 0 1px rgba(255,255,255,.05), 0 8px 24px -8px rgba(0,0,0,.6); color-scheme: dark; }
+  body { font: 1rem/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; margin: 0; display: grid; place-items: center; min-height: 100dvh; padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom); box-sizing: border-box; background: var(--frame); color: var(--text); }
+  /* A phone: the card in the top part, so the keyboard leaves the fields and the button in sight. */
+  /* Sizes in rem, so the browser's text size scales them; the body 16 px on a phone and 13 with a mouse, as in the app's UI text. */
+  @media (pointer: fine) { body { font-size: 0.8125rem; } }
+  @media (pointer: coarse) { body { place-items: start center; padding-top: max(10vh, env(safe-area-inset-top)); } }
+  form { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); padding: 24px; width: min(360px, 100%); box-sizing: border-box; }
+  img { display: block; border-radius: 8px; margin-bottom: 16px; }
+  h1 { font-size: 0.9375rem; font-weight: 600; letter-spacing: -0.1px; margin: 0 0 4px; }
+  label { display: block; margin: 12px 0 0; font-size: 0.75rem; font-weight: 500; color: var(--text-2); }
+  input { font: inherit; font-size: 1rem; width: 100%; box-sizing: border-box; min-height: 44px; padding: 0 12px; margin: 4px 0 0; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--panel); color: var(--text); }
+  input:focus { border-color: var(--accent); }
+  input:not([type=checkbox]):focus-visible { outline: none; box-shadow: 0 0 0 1px var(--accent); }
+  input::placeholder { color: var(--faint); opacity: 1; }
+  button { font: inherit; font-weight: 500; width: 100%; min-height: 44px; margin-top: 16px; border: 0; border-radius: 6px; background: var(--accent); color: var(--on-accent); cursor: pointer; }
+  .show { display: flex; align-items: center; gap: 8px; min-height: 44px; margin: 4px 0 0; font-weight: 400; font-size: inherit; color: var(--text); }
+  .show input { width: 20px; min-height: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
+  /* With a mouse: 32 px fields and button at the UI size, and a 28 px Show the password row (after the rules above, which it overrides). */
+  @media (pointer: fine) { button { min-height: 32px; } input:not([type=checkbox]) { min-height: 32px; font-size: 0.8125rem; } .show { min-height: 28px; margin-top: 8px; } .show input { width: 14px; min-height: 14px; height: 14px; } }
+  .hint { margin: 8px 0 0; font-size: 0.75rem; color: var(--text-2); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  p { margin: 0 0 12px; line-height: 1.45; }
+  p:empty { display: none; }
+  .err { color: var(--err); margin: 12px 0 0; } .err::before { content: "\2715\00a0"; font-weight: 700; } button:disabled { background: var(--line); border-color: var(--line); color: var(--text-2); filter: none; } .faint { color: var(--faint); } [hidden] { display: none; }
 </style>
 <form id="f" data-mode="{{mode}}">
-  <h1 id="title">Dakort</h1>
+  <img src="/favicon.svg" alt="" width="40" height="40">
+  <h1 id="title">Log in to Dakort</h1>
   <p class="faint" id="note">{{note}}</p>
-  <input id="p1" type="password" autocomplete="current-password" placeholder="Password" autofocus>
-  <input id="p2" type="password" autocomplete="new-password" placeholder="The same again" hidden>
+  <label id="w1">Password<input id="p1" type="password" autocomplete="current-password" autofocus></label>
+  <label id="w2" hidden>The same again<input id="p2" type="password" autocomplete="new-password"></label>
+  <p class="hint" id="hint" hidden>Set on your computer, in Other devices.</p>
+  <label class="show" id="w3"><input id="show" type="checkbox"> Show the password</label>
+  <p class="err" id="err" role="alert"></p>
   <button id="go">Log in</button>
-  <p class="err" id="err"></p>
 </form>
 <script>
 const f = document.getElementById('f'), mode = f.dataset.mode
@@ -256,22 +288,27 @@ const p1 = document.getElementById('p1'), p2 = document.getElementById('p2')
 const err = document.getElementById('err'), go = document.getElementById('go')
 if (mode === 'setup') {
   document.getElementById('title').textContent = 'Choose a password'
-  document.getElementById('note').textContent = 'At least 8 characters. Every device logs in with it; each stays logged in for about a year.'
-  p1.autocomplete = 'new-password'; p2.hidden = false; go.textContent = 'Set password'
+  document.getElementById('note').textContent = 'At least 8 characters. Every device logs in with it once and then stays logged in for about\u00a0a\u00a0year.'
+  p1.autocomplete = 'new-password'; document.getElementById('w2').hidden = false; go.textContent = 'Set password'
 }
-if (mode === 'none') { p1.hidden = true; go.hidden = true }
+if (mode === 'login') document.getElementById('hint').hidden = false
+if (mode === 'none') { document.getElementById('w1').hidden = true; document.getElementById('w3').hidden = true; go.hidden = true }
+document.getElementById('show').onchange = (e) => { p1.type = p2.type = e.target.checked ? 'text' : 'password' }
+// Safari on a phone shows a press (:active) only on a page that listens for touches.
+document.addEventListener('touchstart', () => {}, { passive: true })
 f.onsubmit = async (e) => {
   e.preventDefault(); err.textContent = ''
   if (mode === 'setup' && p1.value !== p2.value) { err.textContent = 'The two passwords differ.'; return }
-  go.disabled = true
+  const label = go.textContent
+  go.disabled = true; go.textContent = mode === 'setup' ? 'Setting…' : 'Logging in…'
   try {
     const r = await fetch(mode === 'setup' ? '/api/setup' : '/api/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: p1.value }) })
     if (r.ok) { location.replace('/'); return }
     const b = await r.json().catch(() => ({}))
-    err.textContent = b.error || ('HTTP ' + r.status)
-  } catch (x) { err.textContent = String(x) }
-  go.disabled = false
+    err.textContent = b.error ? b.error.charAt(0).toUpperCase() + b.error.slice(1) + '.' : 'The server could not do that (HTTP ' + r.status + '). Try again.'
+  } catch (x) { err.textContent = 'Dakort cannot be reached. Check the connection and try again.' }
+  go.disabled = false; go.textContent = label
 }
 </script>
 </html>

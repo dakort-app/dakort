@@ -1,0 +1,101 @@
+/* A CSV table and its footer (CsvView.tsx), also the frame of an archive's
+   list (ArchiveView.tsx); loaded with either. */
+/* CSV and TSV: a table with the header and the row numbers held in place
+   while the rest scrolls. Fixed row height: CsvView draws only the rows
+   in view and counts on it. */
+.file-csv {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.csv-box {
+  flex: 1;
+  overflow: auto;
+  container-type: inline-size; /* CsvView caps a column at its width */
+}
+/* More columns past an edge (a phone's width): the right edge fades, and
+   with columns hidden on the left the pinned row numbers get a firmer edge,
+   as in the Excel view. */
+.csv-box[data-more-right] {
+  -webkit-mask-image: linear-gradient(to left, transparent, #000 24px);
+  mask-image: linear-gradient(to left, transparent, #000 24px);
+}
+/* Its focus ring is not faded with its edge. */
+.csv-box[data-more-right]:focus-visible {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+.csv-box[data-more-left] .csv-table .rn {
+  box-shadow: 1px 0 0 var(--line-strong);
+}
+/* Fixed layout needs a set width to apply; 0 makes the table exactly the
+   sum of its columns (CsvView's widths, each at most 42 characters). With
+   no width the columns grew to their longest text, a 636 px last column
+   on a 393 px phone, and a swipe showed blank cells under no header. */
+.csv-table {
+  width: 0;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font: var(--t-code) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.csv-table th,
+.csv-table td {
+  height: var(--ctl); /* CsvView's rowH */
+  padding: 0 var(--sp-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+@media (pointer: coarse) {
+  .csv-table th,
+  .csv-table td {
+    height: var(--ctl-lg);
+  }
+}
+.csv-table .num {
+  text-align: right;
+}
+.csv-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--raised);
+  font-weight: 500;
+  border-bottom-color: var(--line-strong);
+}
+.csv-table .rn {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--raised);
+  color: var(--faint);
+  text-align: right;
+}
+.csv-table thead .rn {
+  z-index: 3;
+}
+@media (hover: hover) {
+  .csv-table tbody tr:hover td {
+    background: var(--hover);
+  }
+}
+.csv-foot {
+  display: flex;
+  align-items: center;
+  min-height: var(--ctl-lg);
+  padding: 0 var(--sp-3) env(safe-area-inset-bottom);
+  border-top: 1px solid var(--line);
+  color: var(--text-2);
+  font-size: var(--t-sm);
+  font-variant-numeric: tabular-nums;
+}
+/* A cell cut short: a tap shows its whole text (CsvView). */
+.csv-table :is(td, th)[data-tip-tap] {
+  cursor: pointer;
+}

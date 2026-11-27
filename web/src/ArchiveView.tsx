@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getJSON } from './api'
 import { fileURL } from './FileView'
+import { ChevronIcon } from './viewicons'
 import { FileIcon, FolderIcon } from './icons'
+import './CsvView.css'
+import './ArchiveView.css'
 
 // What is inside a zip, tar, tar.gz or gz file, as a tree like the
 // explorer's: folders fold, each file with its size and date. The server
@@ -86,6 +89,8 @@ export function ArchiveView({ root, path, version }: { root: string; path: strin
   if (!top || !list) return <div className="center faint">Loading…</div>
 
   const files = list.entries.filter((e) => !e.dir)
+  // The chevron column only when there is a folder to open.
+  const folders = top.kids.some((k) => k.dir)
   const total = files.reduce((s, e) => s + Math.max(e.size, 0), 0)
   const toggle = (p: string) => {
     const next = new Set(open)
@@ -103,11 +108,24 @@ export function ArchiveView({ root, path, version }: { root: string; path: strin
           className={'archive-row' + (k.dir ? ' dir' : '')}
           style={{ paddingLeft: 12 + depth * 16 }}
           onClick={k.dir ? () => toggle(k.path) : undefined}
+          // A folder opens from the keyboard too: Enter or Space flips it,
+          // → opens and ← closes it, as in the explorer's tree.
+          onKeyDown={
+            k.dir
+              ? (e) => {
+                  const flip = e.key === 'Enter' || e.key === ' ' || (e.key === 'ArrowRight' && !on) || (e.key === 'ArrowLeft' && on)
+                  if (!flip) return
+                  e.preventDefault()
+                  toggle(k.path)
+                }
+              : undefined
+          }
           title={k.path}
           role={k.dir ? 'button' : undefined}
+          tabIndex={k.dir ? 0 : undefined}
           aria-expanded={k.dir ? on : undefined}
         >
-          <span className="archive-twisty faint">{k.dir ? (on ? '▾' : '▸') : ''}</span>
+          {folders && <span className={'archive-twisty faint' + (k.dir && on ? ' open' : '')}>{k.dir && <ChevronIcon sm />}</span>}
           {k.dir ? <FolderIcon /> : <FileIcon path={k.name} />}
           <span className="ellipsis grow">{k.name}</span>
           <span className="archive-size faint small">{bytes(k.size)}</span>

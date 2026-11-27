@@ -205,7 +205,7 @@ export function showing(id: string): () => void {
 
 export function dismissFinished(id: string) {
   set({ finished: state.finished.filter((x) => x !== id) })
-  showCount()
+  showIcon()
 }
 
 // The page title names the folder on screen, so Chrome tabs open on
@@ -218,26 +218,24 @@ let placeFolder = ''
 export function setPlace(name: string, folder = '') {
   place = name
   placeFolder = folder
-  showCount()
-}
-
-// The title is just the folder's name ("Dakort" at home): the tab's icon
-// says it is Dakort and whether a turn finished unseen, so neither a
-// suffix nor a count takes the tab's narrow width any more.
-function showCount() {
-  document.title = place || 'Dakort'
   showIcon()
 }
 
-// The tab's icon by the same rule as the count: a turn finished unseen in
-// this tab's folder (every folder, at home), else one running there or
-// background tasks (agents, commands) that outlived their turn: those
-// once left the icon idle while agents worked.
+// The tab's icon and title: a turn finished unseen in this tab's folder
+// (every folder, at home), else one running there or background tasks
+// (agents, commands) that outlived their turn: those once left the icon
+// idle while agents worked. The title is the folder's name ("Dakort" at
+// home), with a dot in front while a turn finished there unseen, the same
+// moment the icon turns to its round disc: the state is in the words too
+// (the tab's hover card, the window menu, a screen reader), not only in
+// the icon. One character, not a count, so a narrow tab keeps the name.
 function showIcon() {
   const here = (id: string) => !placeFolder || sameFolder(state.sessions.find((s) => s.id === id)?.folder, placeFolder)
   const active = [...Object.keys(state.live.turns).filter((id) => working(state.live, id)), ...Object.keys(state.live.tasks)].some(here)
-  if (finishedIn(state.finished, state.sessions, placeFolder)) showFavicon('done')
-  else showFavicon(active ? 'run' : 'idle')
+  const done = finishedIn(state.finished, state.sessions, placeFolder)
+  const title = (done ? '● ' : '') + (place || 'Dakort')
+  if (document.title !== title) document.title = title
+  showFavicon(done ? 'done' : active ? 'run' : 'idle')
 }
 listeners.add(showIcon)
 
@@ -247,14 +245,14 @@ document.addEventListener('visibilitychange', () => {
 })
 
 // No system notifications: the Windows popups were found intrusive. The
-// toast and the count in the page title are enough.
+// toast and the tab's icon and title are enough.
 
 function finishedElsewhere(id: string) {
   const onScreen = viewing.has(id) && document.visibilityState === 'visible'
   if (onScreen) return
   seenWhenFinished.set(id, state.sessions.find((s) => s.id === id)?.seen)
   set({ finished: [...state.finished.filter((x) => x !== id), id] })
-  showCount()
+  showIcon()
 }
 
 // Read on another device: the server's seen time for it has moved since it
@@ -267,7 +265,7 @@ function dropReadElsewhere() {
     return s && s.seen !== seenWhenFinished.get(id) && !isUnread(s)
   })
   if (read.length) set({ finished: state.finished.filter((id) => !read.includes(id)) })
-  if (read.length) showCount()
+  if (read.length) showIcon()
 }
 
 // Collapse asks a session's transcript to show only its newest rows, after
